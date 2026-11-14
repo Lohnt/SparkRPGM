@@ -18,6 +18,7 @@ struct GamePlayerView: View {
     @State private var isEditing = false
     @State private var scope: ControlSettingsStore.Scope = .game
     @State private var didConfigure = false
+    @State private var speedMultiplier = 1
 
     private static let haptic = UIImpactFeedbackGenerator(style: .light)
 
@@ -175,7 +176,7 @@ struct GamePlayerView: View {
 
     private var topBar: some View {
         VStack {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Button(action: close) {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 14, weight: .bold))
@@ -195,6 +196,28 @@ struct GamePlayerView: View {
                 }
 
                 Spacer(minLength: 4)
+
+                if !game.engine.isMKXP {
+                    Button(action: cycleSpeed) {
+                        Text("\(speedMultiplier)x")
+                            .font(.system(size: 12, weight: .heavy, design: .rounded))
+                            .frame(width: 32, height: 32)
+                            .background(
+                                speedMultiplier > 1
+                                    ? Color(red: 0.49, green: 0.36, blue: 1.0)
+                                    : Color.white.opacity(0.10)
+                            )
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle().stroke(
+                                    Color.white.opacity(speedMultiplier > 1 ? 0.45 : 0),
+                                    lineWidth: 1
+                                )
+                            )
+                    }
+                    .accessibilityLabel("Game speed")
+                    .accessibilityValue("\(speedMultiplier) times")
+                }
 
                 Button {
                     cycleOrientation()
@@ -478,6 +501,15 @@ struct GamePlayerView: View {
         let next = modes[(index + 1) % modes.count]
         controls.config.orientation = next
         OrientationManager.shared.apply(next)
+    }
+
+    /// 1x → 2x → 3x → 1x. Applied live through `window.__sparkSetSpeed`.
+    private func cycleSpeed() {
+        let next = speedMultiplier >= 3 ? 1 : speedMultiplier + 1
+        withAnimation(.easeOut(duration: 0.15)) {
+            speedMultiplier = next
+        }
+        session.setSpeed(next)
     }
 }
 

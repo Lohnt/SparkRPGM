@@ -13,6 +13,7 @@ enum RuntimeScripts {
         "spark-audio",
         "spark-storage",
         "spark-input",
+        "spark-speed",
     ]
 
     static func source(named name: String, bundle: Bundle = .main) -> String? {

@@ -29,6 +29,9 @@ final class GameSession: NSObject, ObservableObject {
     private let resolver: CaseInsensitiveFileResolver
     private var didSetup = false
     private var lastReadyAt = Date.distantPast
+    /// 1x / 2x / 3x requested from the in-game top bar. Kept here so a reload
+    /// or a web-process restart re-applies it to the fresh page.
+    private var speedMultiplier = 1
 
     init(game: Game, entry: Entry = .gameIndex) {
         self.game = game
@@ -150,6 +153,26 @@ final class GameSession: NSObject, ObservableObject {
         isLoading = true
     }
 
+    /// Sets the in-game speed multiplier (clamped to 1–3).
+    ///
+    /// The JS shim multiplies `SceneManager.updateScene` for MV/MZ or the
+    /// `requestAnimationFrame` loop for EasyRPG/HTML5. Re-applied automatically
+    /// after a reload, a web-process restart, and the first `sparkReady` ping.
+    func setSpeed(_ multiplier: Int) {
+        speedMultiplier = max(1, min(3, multiplier))
+        applySpeed()
+    }
+
+    private func applySpeed() {
+        let value = speedMultiplier
+        evaluate("""
+        if (window.__sparkSetSpeed) {
+          try { window.__sparkSetSpeed(\(value)); }
+          catch (e) { console.error('[SparkRPGM] setSpeed failed', e); }
+        }
+        """)
+    }
+
     func stop() {
         webView?.stopLoading()
         let controller = webView?.configuration.userContentController
@@ -222,6 +245,7 @@ final class GameSession: NSObject, ObservableObject {
             if Date().timeIntervalSince(lastReadyAt) > 0.3 {
                 lastReadyAt = Date()
                 isLoading = false
+                if speedMultiplier > 1 { applySpeed() }
             }
 
         case "sparkContextLost":
@@ -458,6 +482,7 @@ extension GameSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoading = false
+        if speedMultiplier > 1 { applySpeed() }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {

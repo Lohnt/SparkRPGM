@@ -89,7 +89,8 @@ Two library styles, switchable from the top bar or from **Paintbrush**:
   cards) with artwork or an engine fallback badge.
 
 Both styles show `size • playtime` (for example `4.2 GB • 3h 20m`, or
-`4.2 GB • Unplayed`). Search and engine filter chips, plus sorting by name,
+`4.2 GB • Unplayed`) plus a relative hint such as `Played today` or
+`Played yesterday`. Search and engine filter chips, plus sorting by name,
 recently played, most played or size.
 
 Long‑press a game for **Rename**, **Set Custom Cover**, **Remove Custom Cover**,
@@ -136,8 +137,15 @@ The translucent overlay maps to the keyCodes RPG Maker listens for:
 | Shift | 16 |
 | Ctrl / Skip | 17 |
 
-The top pill bar has back, orientation (Landscape / Portrait / Auto), reload,
-**Customize Controls** and hide‑chrome. Tapping **Show** brings the chrome back.
+The top pill bar has back, game speed (1× → 2× → 3× → 1×), orientation
+(Landscape / Portrait / Auto), reload, **Customize Controls** and hide‑chrome.
+Tapping **Show** brings the chrome back.
+
+The speed button calls `window.__sparkSetSpeed(multiplier)`:
+RPG Maker MV/MZ tick `SceneManager.updateScene` 2–3 times per rendered frame,
+while EasyRPG and plain HTML5 repeat the `requestAnimationFrame` loop (extra
+loop re‑registrations are dropped, so exactly one loop stays alive). 1× restores
+normal speed without a reload.
 
 **Customize Controls** lets you drag the D‑Pad and the action cluster, resize
 them (0.6×–1.8×), change opacity (10–100 %), enable auto‑fade, 8‑way input,

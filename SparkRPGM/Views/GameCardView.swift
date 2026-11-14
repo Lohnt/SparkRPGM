@@ -130,6 +130,14 @@ struct GameCardView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.65)
                 }
+
+                if let hint = game.lastPlayedHint {
+                    Text(hint)
+                        .font(.system(size: cardSize == .compact ? 8.5 : 9.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.4))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
             }
             .padding(cardSize == .compact ? 9 : 12)
         }

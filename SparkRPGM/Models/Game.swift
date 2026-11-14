@@ -58,12 +58,28 @@ struct Game: Identifiable, Equatable {
         "\(formattedSize)  •  \(formattedPlaytime)"
     }
 
-    var formattedLastPlayed: String? {
+    /// Human hint for the library items: `Played today`, `Played yesterday`,
+    /// `Played 3d ago`, `Played 2w ago`, or a short date for older sessions.
+    var lastPlayedHint: String? {
         guard let lastPlayed = lastPlayed else { return nil }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: lastPlayed, relativeTo: Date())
+        let calendar = Calendar.current
+        if calendar.isDateInToday(lastPlayed) { return "Played today" }
+        if calendar.isDateInYesterday(lastPlayed) { return "Played yesterday" }
+
+        let start = calendar.startOfDay(for: lastPlayed)
+        let today = calendar.startOfDay(for: Date())
+        let days = calendar.dateComponents([.day], from: start, to: today).day ?? 0
+
+        if days > 0 && days < 7 { return "Played \(days)d ago" }
+        if days >= 7 && days < 30 { return "Played \(max(1, days / 7))w ago" }
+        return "Played " + Self.shortDateFormatter.string(from: lastPlayed)
     }
+
+    private static let shortDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 
     static func == (lhs: Game, rhs: Game) -> Bool {
         lhs.folderName == rhs.folderName

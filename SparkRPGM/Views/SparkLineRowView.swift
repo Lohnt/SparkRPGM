@@ -28,10 +28,10 @@ struct SparkLineRowView: View {
                     )
                 )
                 .frame(width: 4)
-                .padding(.vertical, 12)
+                .padding(.vertical, 11)
                 .shadow(color: lineColor.opacity(0.55), radius: 4, x: 0, y: 0)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(game.title)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.white)
@@ -48,24 +48,23 @@ struct SparkLineRowView: View {
 
                     Spacer(minLength: 0)
                 }
+
+                if let hint = game.lastPlayedHint {
+                    Text(hint)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.white.opacity(0.38))
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 4)
 
-            VStack(alignment: .trailing, spacing: 3) {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundColor(lineColor.opacity(0.9))
-                if let lastPlayed = game.formattedLastPlayed {
-                    Text(lastPlayed)
-                        .font(.system(size: 8, weight: .medium))
-                        .foregroundColor(.white.opacity(0.32))
-                        .lineLimit(1)
-                }
-            }
+            Image(systemName: "play.circle.fill")
+                .font(.system(size: 20, weight: .regular))
+                .foregroundColor(lineColor.opacity(0.9))
         }
         .padding(.trailing, 14)
-        .frame(minHeight: 62)
+        .frame(minHeight: 68)
         .background(
             ZStack {
                 BlurView(style: .systemUltraThinMaterialDark)

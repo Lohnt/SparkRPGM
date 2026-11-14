@@ -214,7 +214,7 @@ final class GameSession: NSObject, ObservableObject {
         if Thread.isMainThread {
             run()
         } else {
-            DispatchQueue.main.async(execute: run)
+            DispatchQueue.main.async { _ = run() }
         }
     }
 

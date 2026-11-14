@@ -39,7 +39,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             picker.dismiss(animated: true) {
                 DispatchQueue.main.async {
-                    parent.isPresented = false
+                    self.parent.isPresented = false
                 }
             }
 
@@ -53,7 +53,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
                 }
                 guard let image = object as? UIImage else { return }
                 DispatchQueue.main.async {
-                    parent.onPicked(image)
+                    self.parent.onPicked(image)
                 }
             }
         }

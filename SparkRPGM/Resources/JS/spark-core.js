@@ -160,6 +160,7 @@
   // MARK: - Ready detection
 
   var attempts = 0;
+  var stallReported = false;
   var engineTimer = setInterval(function () {
     attempts += 1;
 
@@ -171,9 +172,24 @@
       return;
     }
 
-    if (attempts >= 80) {
+    // Never fake readiness. If the engine is still missing after ~25 s, report
+    // a stall so the native overlay can offer Retry + diagnostics instead of
+    // clearing the spinner onto a black canvas.
+    if (attempts >= 100) {
       clearInterval(engineTimer);
-      Spark.ready('timeout');
+      if (!stallReported && !Spark.readySent) {
+        stallReported = true;
+        Spark.lastError = 'The engine did not start within 25 seconds';
+        Spark.post('sparkError', {
+          kind: 'stall',
+          message: Spark.lastError,
+          source: location.href,
+          line: 0,
+          engine: cfg.engine || 'unknown',
+          title: cfg.gameTitle || '',
+          readySent: Spark.readySent
+        });
+      }
     }
   }, 250);
 

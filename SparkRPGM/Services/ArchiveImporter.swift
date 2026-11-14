@@ -14,7 +14,7 @@ struct ImportResult {
 /// directly to disk and never holds a whole game in memory.
 final class ArchiveImporter {
 
-    typealias ProgressHandler = (Double?, String) -> Void
+    typealias ProgressHandler = (ArchiveExtractor.Progress) -> Void
 
     private let metadata: MetadataStore
     private let fileManager = FileManager.default
@@ -50,20 +50,30 @@ final class ArchiveImporter {
         try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true, attributes: nil)
         try fileManager.createDirectory(at: extraction, withIntermediateDirectories: true, attributes: nil)
 
-        progress(0.02, "Extracting \(archiveURL.lastPathComponent)…")
+        progress(ArchiveExtractor.Progress(
+            fraction: 0.02,
+            status: "Scanning \(archiveURL.lastPathComponent)",
+            phase: .scanning
+        ))
 
         try ArchiveExtractor.extract(
             archiveURL: archiveURL,
             to: extraction,
             token: token
         ) { update in
-            let fraction = update.fraction.map { 0.02 + $0 * 0.80 }
-            progress(fraction, update.status)
+            var report = update
+            report.fraction = update.fraction.map { 0.02 + $0 * 0.80 }
+            report.phase = .extracting
+            progress(report)
         }
 
         guard !token.isCancelled else { throw ArchiveError.cancelled }
 
-        progress(0.85, "Detecting game engine…")
+        progress(ArchiveExtractor.Progress(
+            fraction: 0.85,
+            status: "Detecting game engine",
+            phase: .configuring
+        ))
         guard let detection = GameRootDetector.detect(in: extraction) else {
             throw ImportFailure.noGameFound
         }
@@ -71,12 +81,17 @@ final class ArchiveImporter {
         // Strip Android wrapper hooks before the game becomes visible.
         _ = APKSanitizer.sanitize(root: detection.rootURL)
 
-        progress(0.90, "Installing \(detection.engine.displayName) game…")
+        progress(ArchiveExtractor.Progress(
+            fraction: 0.90,
+            status: "Configuring \(detection.engine.displayName)",
+            phase: .configuring
+        ))
         return try install(
             rootURL: detection.rootURL,
             engine: detection.engine,
             suggestedTitle: detection.title,
             stagingRoot: stagingRoot,
+            searchRoot: extraction,
             token: token,
             progress: progress
         )
@@ -105,14 +120,22 @@ final class ArchiveImporter {
         defer { try? fileManager.removeItem(at: stagingRoot) }
         try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true, attributes: nil)
 
-        progress(0.05, "Inspecting folder…")
+        progress(ArchiveExtractor.Progress(
+            fraction: 0.05,
+            status: "Inspecting folder",
+            phase: .scanning
+        ))
         guard let detection = GameRootDetector.detect(in: folderURL, maxDepth: 5) else {
             throw ImportFailure.noGameFound
         }
 
         _ = APKSanitizer.sanitize(root: detection.rootURL)
 
-        progress(0.25, "Copying \(detection.rootURL.lastPathComponent)…")
+        progress(ArchiveExtractor.Progress(
+            fraction: 0.25,
+            status: "Copying \(detection.rootURL.lastPathComponent)",
+            phase: .configuring
+        ))
         let copy = stagingRoot.appendingPathComponent("game", isDirectory: true)
 
         do {
@@ -129,12 +152,17 @@ final class ArchiveImporter {
 
         guard !token.isCancelled else { throw ArchiveError.cancelled }
 
-        progress(0.92, "Installing…")
+        progress(ArchiveExtractor.Progress(
+            fraction: 0.92,
+            status: "Installing game",
+            phase: .configuring
+        ))
         return try install(
             rootURL: copy,
             engine: detection.engine,
             suggestedTitle: detection.title,
             stagingRoot: stagingRoot,
+            searchRoot: copy,
             token: token,
             progress: progress
         )
@@ -147,6 +175,7 @@ final class ArchiveImporter {
         engine: GameEngine,
         suggestedTitle: String,
         stagingRoot: URL,
+        searchRoot: URL?,
         token: ImportCancellationToken,
         progress: @escaping ProgressHandler
     ) throws -> ImportResult {
@@ -157,10 +186,24 @@ final class ArchiveImporter {
 
         guard !token.isCancelled else { throw ArchiveError.cancelled }
 
+        // Capture the cover before the engine root moves, which is the only
+        // moment an APK's `res/mipmap-*` icon is still reachable.
+        let coverSource = GameCoverFinder.find(
+            inGameRoot: searchRoot ?? rootURL,
+            engineRoot: rootURL
+        )
+        var autoCover: URL?
+        if let coverSource = coverSource {
+            autoCover = GameCoverFinder.cache(candidate: coverSource, forGame: folderName)
+        }
+
         do {
             try fileManager.createDirectory(at: AppPaths.games, withIntermediateDirectories: true, attributes: nil)
             try fileManager.moveItem(at: rootURL, to: destination)
         } catch {
+            if let autoCover = autoCover {
+                try? fileManager.removeItem(at: autoCover)
+            }
             throw ImportFailure.installFailed(error.localizedDescription)
         }
 
@@ -181,7 +224,11 @@ final class ArchiveImporter {
             try? fileManager.removeItem(at: stagingRoot)
         }
 
-        progress(1.0, "Ready to play")
+        progress(ArchiveExtractor.Progress(
+            fraction: 1.0,
+            status: "Ready to play",
+            phase: .finishing
+        ))
         Log.app("Imported \(folderName) [\(engine.rawValue)]")
 
         return ImportResult(

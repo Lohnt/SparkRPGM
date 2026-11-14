@@ -61,9 +61,9 @@ jobs:
           rm -rf SparkRPGM/Resources/IconAssets
           python scripts/generate_icons.py --repo-root "$GITHUB_WORKSPACE"
           test -f SparkRPGM/Resources/IconAssets/AppIcon@2x.png
-          test -f SparkRPGM/Resources/IconAssets/IconEditor@2x.png
-          test -f SparkRPGM/Resources/IconAssets/IconY2KDisc-83.5@2x.png
-          test -f SparkRPGM/Resources/IconAssets/IconOrbit-83.5@2x~ipad.png
+          test -f SparkRPGM/Resources/IconAssets/Editor@2x.png
+          test -f SparkRPGM/Resources/IconAssets/Y2KDisc-83.5@2x.png
+          test -f SparkRPGM/Resources/IconAssets/Orbit-83.5@2x~ipad.png
           test -f SparkRPGM/Resources/IconPreviews/PreviewBlueprint.png
           ls -la SparkRPGM/Resources/IconAssets | head -20
 
@@ -167,16 +167,16 @@ jobs:
             exit 1
           fi
           test -f "$APP/AppIcon@2x.png"
-          test -f "$APP/IconEditor@2x.png"
-          test -f "$APP/IconOrbit@2x.png"
-          test -f "$APP/IconOrbit-83.5@2x~ipad.png"
-          test -f "$APP/IconY2KDisc@2x~ipad.png"
+          test -f "$APP/Editor@2x.png"
+          test -f "$APP/Orbit@2x.png"
+          test -f "$APP/Orbit-83.5@2x~ipad.png"
+          test -f "$APP/Y2KDisc@2x~ipad.png"
           if [ -d "$APP/IconAssets" ]; then
             echo "error: IconAssets must be flattened into the .app root"
             exit 1
           fi
           echo "--- alternate icons at bundle root ---"
-          ls "$APP" | grep -E '^(AppIcon|Icon(Editor|Orbit|Y2KDisc))' | sort | head -30
+          ls "$APP" | grep -E '^(AppIcon|(Editor|Orbit|Y2KDisc|Vinyl|Cosmos|Amethyst|Cassette|Invincible|Blueprint))' | sort | head -30
 
       - name: Write build summary
         if: always()

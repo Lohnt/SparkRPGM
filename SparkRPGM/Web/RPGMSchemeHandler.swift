@@ -27,14 +27,28 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
         attributes: .concurrent
     )
 
+    /// Path of the engine root relative to `gameRoot` (for example `www` for a
+    /// nested web build). Used to rescue root-absolute URLs such as
+    /// `/js/main.js` that some exported builds emit regardless of `base`.
+    private let entryPath: String
+
+    /// Called on the main queue, at most once per logical path, when a request
+    /// cannot be resolved. Powers the "missing file" diagnostics in
+    /// `GamePlayerView` instead of an endless spinner.
+    var onMissingResource: ((String) -> Void)?
+
     private let stateLock = NSLock()
     private var stoppedTasks = Set<ObjectIdentifier>()
+    private var reportedMissing = Set<String>()
 
     private static let chunkSize = 256 * 1024
 
-    init(gameRoot: URL, bundle: Bundle = .main) {
+    init(gameRoot: URL, entryPath: String = "", bundle: Bundle = .main) {
         self.gameRoot = gameRoot.standardizedFileURL
         self.resolver = CaseInsensitiveFileResolver(root: self.gameRoot)
+        self.entryPath = entryPath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.runtimeRoot = bundle.url(forResource: "WebRuntime", withExtension: nil)
         if let runtimeRoot = self.runtimeRoot {
             self.runtimeResolver = CaseInsensitiveFileResolver(root: runtimeRoot)
@@ -99,12 +113,14 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         guard let fileURL = resolveFileURL(for: requestURL) else {
+            reportMissing(requestURL)
             fail(task, identifier: identifier, status: 404, message: "Not found")
             return
         }
 
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            reportMissing(requestURL)
             fail(task, identifier: identifier, status: 404, message: "Not found")
             return
         }
@@ -210,15 +226,51 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
             relative += "/index.html"
         }
 
+        if let url = resolveRelative(relative) {
+            return url
+        }
+
+        // Root-absolute URLs (`/js/main.js`) from a build whose entry point
+        // lives in `www/` need the entry path prepended before giving up.
+        if !entryPath.isEmpty,
+           relative != entryPath,
+           !relative.hasPrefix(entryPath + "/"),
+           let url = resolveRelative(entryPath + "/" + relative) {
+            return url
+        }
+
+        return nil
+    }
+
+    /// Resolves a relative path to a file, expanding a directory to its
+    /// `index.html` as a convenience.
+    private func resolveRelative(_ relative: String) -> URL? {
         if let url = resolver.resolve(relative) {
             if AppPaths.isDirectory(url) {
                 return resolver.resolve(relative + "/index.html")
             }
             return url
         }
-
-        // Last resort: treat it as a directory.
         return resolver.resolve(relative + "/index.html")
+    }
+
+    /// Tells the session about a resource that could not be served, which is
+    /// the single most useful signal when a game hangs before `sparkReady`.
+    private func reportMissing(_ requestURL: URL) {
+        var path = requestURL.path
+        while path.hasPrefix("/") { path.removeFirst() }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        let logical = parts.count > 1 ? parts.dropFirst().joined(separator: "/") : path
+        guard !logical.isEmpty else { return }
+
+        stateLock.lock()
+        let isNew = reportedMissing.insert(logical).inserted
+        stateLock.unlock()
+        guard isNew, let callback = onMissingResource else { return }
+
+        DispatchQueue.main.async {
+            callback(logical)
+        }
     }
 
     // MARK: - Generated EasyRPG resources
@@ -402,6 +454,13 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
         var headers: [String: String] = [
             "Content-Type": "text/html; charset=utf-8",
             "Content-Length": String(body.count),
+            // Scripts and workers still expect a CORS-clean failure; without
+            // this WebKit reports the 404 as a generic network error and hides
+            // the real cause from the diagnostics overlay.
+            "Access-Control-Allow-Origin": "*",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "Cache-Control": "no-store",
+            "X-Spark-Served": "rpgm-error",
         ]
         if status == 416 {
             headers["Content-Range"] = "bytes */0"

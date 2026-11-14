@@ -37,20 +37,26 @@ except ImportError:  # pragma: no cover - handled with a clear message
     raise
 
 # ---------------------------------------------------------------------------
-# Icon catalogue: (asset set name, picker title, preview file stem, renderer)
+# Icon catalogue:
+#   (asset set name, picker title, preview file stem, renderer, bundle stem)
+#
+# The bundle stem is the filename used for the loose PNGs that
+# `UIApplication.setAlternateIconName` resolves at the app bundle root. It is
+# deliberately unprefixed (`Editor@2x.png`) because that is what the launcher
+# checks and what Info.plist advertises.
 # ---------------------------------------------------------------------------
 
 ICON_SETS = [
-    ("AppIcon", "Default", "PreviewDefault", "default"),
-    ("IconEditor", "Editor", "PreviewEditor", "editor"),
-    ("IconOrbit", "Orbit", "PreviewOrbit", "orbit"),
-    ("IconVinyl", "Vinyl", "PreviewVinyl", "vinyl"),
-    ("IconCosmos", "Cosmos", "PreviewCosmos", "cosmos"),
-    ("IconAmethyst", "Amethyst", "PreviewAmethyst", "amethyst"),
-    ("IconY2KDisc", "Y2K Disc", "PreviewY2KDisc", "y2k"),
-    ("IconCassette", "Cassette", "PreviewCassette", "cassette"),
-    ("IconInvincible", "Invincible", "PreviewInvincible", "invincible"),
-    ("IconBlueprint", "Blueprint", "PreviewBlueprint", "blueprint"),
+    ("AppIcon", "Default", "PreviewDefault", "default", "AppIcon"),
+    ("IconEditor", "Editor", "PreviewEditor", "editor", "Editor"),
+    ("IconOrbit", "Orbit", "PreviewOrbit", "orbit", "Orbit"),
+    ("IconVinyl", "Vinyl", "PreviewVinyl", "vinyl", "Vinyl"),
+    ("IconCosmos", "Cosmos", "PreviewCosmos", "cosmos", "Cosmos"),
+    ("IconAmethyst", "Amethyst", "PreviewAmethyst", "amethyst", "Amethyst"),
+    ("IconY2KDisc", "Y2K Disc", "PreviewY2KDisc", "y2k", "Y2KDisc"),
+    ("IconCassette", "Cassette", "PreviewCassette", "cassette", "Cassette"),
+    ("IconInvincible", "Invincible", "PreviewInvincible", "invincible", "Invincible"),
+    ("IconBlueprint", "Blueprint", "PreviewBlueprint", "blueprint", "Blueprint"),
 ]
 
 # iPhone + iPad app icon sizes (base points, scale)
@@ -566,16 +572,16 @@ BUNDLE_ICON_VARIANTS = [
 ]
 
 
-def build_bundle_icons(repo_root: str, set_name: str, base_img: Image.Image):
+def build_bundle_icons(repo_root: str, bundle_stem: str, base_img: Image.Image):
     folder = os.path.join(repo_root, "SparkRPGM", "Resources", "IconAssets")
     os.makedirs(folder, exist_ok=True)
     for suffix, pixels in BUNDLE_ICON_VARIANTS:
-        write_image(base_img, os.path.join(folder, f"{set_name}{suffix}"), pixels)
+        write_image(base_img, os.path.join(folder, f"{bundle_stem}{suffix}"), pixels)
 
 
 def prune_stale(assets_root: str, icon_root: str, preview_root: str):
     """Removes icons and previews that are no longer in the catalogue."""
-    keep_sets = {f"{name}.appiconset" for name, _, _, _ in ICON_SETS}
+    keep_sets = {f"{name}.appiconset" for name, _, _, _, _ in ICON_SETS}
     keep_sets.add("AccentColor.colorset")
     for entry in os.listdir(assets_root):
         if entry.endswith(".appiconset") and entry not in keep_sets:
@@ -584,14 +590,14 @@ def prune_stale(assets_root: str, icon_root: str, preview_root: str):
                 os.remove(os.path.join(folder, name))
             os.rmdir(folder)
 
-    keep_previews = {preview for _, _, preview, _ in ICON_SETS}
+    keep_previews = {preview for _, _, preview, _, _ in ICON_SETS}
     for entry in os.listdir(preview_root):
         if entry.endswith(".png") and entry[:-4] not in keep_previews:
             os.remove(os.path.join(preview_root, entry))
 
     keep_bundle = {
-        f"{name}{suffix}"
-        for name, _, _, _ in ICON_SETS
+        f"{stem}{suffix}"
+        for _, _, _, _, stem in ICON_SETS
         for suffix, _ in BUNDLE_ICON_VARIANTS
     }
     for entry in os.listdir(icon_root):
@@ -648,11 +654,11 @@ def main() -> int:
 
     prune_stale(assets_root, icon_root, preview_root)
 
-    for set_name, title, preview, key in ICON_SETS:
+    for set_name, title, preview, key, bundle_stem in ICON_SETS:
         print(f"Rendering {set_name} ({title}) ...")
         img = render_icon(key)
         build_appiconset(assets_root, set_name, img)
-        build_bundle_icons(repo_root, set_name, img)
+        build_bundle_icons(repo_root, bundle_stem, img)
         if not args.skip_previews:
             write_image(img, os.path.join(preview_root, f"{preview}.png"), 1024)
 

@@ -91,8 +91,9 @@ targets:
           fi
           # CFBundleIconFiles resolves these from the .app root, never from a
           # nested folder, which is what caused OSStatus error -54.
-          test -f "$DEST/IconEditor@2x.png"
-          test -f "$DEST/IconOrbit-83.5@2x~ipad.png"
+          test -f "$DEST/Editor@2x.png"
+          test -f "$DEST/Editor-83.5@2x~ipad.png"
+          test -f "$DEST/Y2KDisc@2x.png"
           echo "Flattened $copied alternate icon PNGs into $DEST"
     dependencies:
       - package: ZIPFoundation

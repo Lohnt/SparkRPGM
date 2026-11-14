@@ -6,10 +6,31 @@ struct ImportJob: Identifiable, Equatable {
     let fileName: String
     var statusText: String
     var fraction: Double?
+    var phase: ImportPhase = .scanning
+    var completedFiles: Int = 0
+    var totalFiles: Int = 0
     var isFinished: Bool = false
     var errorText: String?
 
     var isFailed: Bool { errorText != nil }
+
+    /// 0...1 value used by the determinate bar. Falls back to the entry counter
+    /// when the extractor cannot compute a byte fraction.
+    var progressValue: Double {
+        if let fraction = fraction {
+            return max(0, min(1, fraction))
+        }
+        if totalFiles > 0 {
+            return max(0, min(1, Double(completedFiles) / Double(totalFiles)))
+        }
+        return 0
+    }
+
+    /// `840 / 2,150 files`, or nil while the entry count is unknown.
+    var counterText: String? {
+        guard totalFiles > 0 else { return nil }
+        return "\(completedFiles.formatted()) / \(totalFiles.formatted()) files"
+    }
 }
 
 /// Serialises archive imports and publishes their progress to the UI.
@@ -124,8 +145,9 @@ final class ImportCoordinator: ObservableObject {
         let job = ImportJob(
             id: jobID,
             fileName: fileName,
-            statusText: "Selected \(fileName)…",
-            fraction: 0
+            statusText: "Selected \(fileName)",
+            fraction: 0,
+            phase: .scanning
         )
         jobs.append(job)
 
@@ -139,13 +161,8 @@ final class ImportCoordinator: ObservableObject {
                 // Resolves provider-hosted files into a readable local URL
                 // before the extractor touches them.
                 let readableURL = try document.prepare()
-                let imported = try self.importer.importItem(at: readableURL, token: token) { fraction, status in
-                    DispatchQueue.main.async {
-                        self.update(jobID: jobID) { job in
-                            job.fraction = fraction
-                            job.statusText = status
-                        }
-                    }
+                let imported = try self.importer.importItem(at: readableURL, token: token) { update in
+                    self.deliver(update, jobID: jobID)
                 }
                 result = .success(imported)
             } catch {
@@ -160,6 +177,7 @@ final class ImportCoordinator: ObservableObject {
                 case .success(let imported):
                     self.update(jobID: jobID) { job in
                         job.fraction = 1
+                        job.phase = .finishing
                         job.statusText = "Imported \(imported.title)"
                         job.isFinished = true
                     }
@@ -169,18 +187,44 @@ final class ImportCoordinator: ObservableObject {
                     self.store.scan()
 
                 case .failure(let error):
-                    let message = error.localizedDescription
+                    let cancelled: Bool
+                    if let archiveError = error as? ArchiveError, case .cancelled = archiveError {
+                        cancelled = true
+                    } else {
+                        cancelled = false
+                    }
+                    let message = cancelled ? "Import cancelled." : error.localizedDescription
                     self.update(jobID: jobID) { job in
                         job.fraction = nil
-                        job.statusText = "Import failed"
+                        job.statusText = cancelled ? "Import cancelled" : "Import failed"
                         job.errorText = message
                         job.isFinished = true
                     }
-                    self.failureMessage = message
+                    if !cancelled {
+                        self.failureMessage = message
+                    }
                 }
 
                 self.isProcessing = false
                 self.processNext()
+            }
+        }
+    }
+
+    /// Hops to the main actor for every progress update so the SwiftUI card is
+    /// always mutated from the same isolated context.
+    private func deliver(_ update: ArchiveExtractor.Progress, jobID: UUID) {
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            self.update(jobID: jobID) { job in
+                // A progress callback can land after the completion hop; never
+                // let it overwrite the final "Imported" state.
+                guard !job.isFinished else { return }
+                job.fraction = update.fraction
+                job.statusText = update.status
+                job.phase = update.phase
+                job.completedFiles = update.completedFiles
+                job.totalFiles = update.totalFiles
             }
         }
     }

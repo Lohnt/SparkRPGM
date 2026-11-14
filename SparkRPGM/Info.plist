@@ -105,9 +105,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconEditor</string>
-					<string>IconEditor-76</string>
-					<string>IconEditor-83.5</string>
+					<string>Editor</string>
+					<string>Editor-76</string>
+					<string>Editor-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -116,9 +116,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconOrbit</string>
-					<string>IconOrbit-76</string>
-					<string>IconOrbit-83.5</string>
+					<string>Orbit</string>
+					<string>Orbit-76</string>
+					<string>Orbit-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -127,9 +127,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconVinyl</string>
-					<string>IconVinyl-76</string>
-					<string>IconVinyl-83.5</string>
+					<string>Vinyl</string>
+					<string>Vinyl-76</string>
+					<string>Vinyl-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -138,9 +138,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconCosmos</string>
-					<string>IconCosmos-76</string>
-					<string>IconCosmos-83.5</string>
+					<string>Cosmos</string>
+					<string>Cosmos-76</string>
+					<string>Cosmos-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -149,9 +149,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconAmethyst</string>
-					<string>IconAmethyst-76</string>
-					<string>IconAmethyst-83.5</string>
+					<string>Amethyst</string>
+					<string>Amethyst-76</string>
+					<string>Amethyst-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -160,9 +160,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconY2KDisc</string>
-					<string>IconY2KDisc-76</string>
-					<string>IconY2KDisc-83.5</string>
+					<string>Y2KDisc</string>
+					<string>Y2KDisc-76</string>
+					<string>Y2KDisc-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -171,9 +171,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconCassette</string>
-					<string>IconCassette-76</string>
-					<string>IconCassette-83.5</string>
+					<string>Cassette</string>
+					<string>Cassette-76</string>
+					<string>Cassette-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -182,9 +182,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconInvincible</string>
-					<string>IconInvincible-76</string>
-					<string>IconInvincible-83.5</string>
+					<string>Invincible</string>
+					<string>Invincible-76</string>
+					<string>Invincible-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -193,9 +193,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconBlueprint</string>
-					<string>IconBlueprint-76</string>
-					<string>IconBlueprint-83.5</string>
+					<string>Blueprint</string>
+					<string>Blueprint-76</string>
+					<string>Blueprint-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -221,9 +221,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconEditor</string>
-					<string>IconEditor-76</string>
-					<string>IconEditor-83.5</string>
+					<string>Editor</string>
+					<string>Editor-76</string>
+					<string>Editor-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -232,9 +232,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconOrbit</string>
-					<string>IconOrbit-76</string>
-					<string>IconOrbit-83.5</string>
+					<string>Orbit</string>
+					<string>Orbit-76</string>
+					<string>Orbit-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -243,9 +243,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconVinyl</string>
-					<string>IconVinyl-76</string>
-					<string>IconVinyl-83.5</string>
+					<string>Vinyl</string>
+					<string>Vinyl-76</string>
+					<string>Vinyl-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -254,9 +254,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconCosmos</string>
-					<string>IconCosmos-76</string>
-					<string>IconCosmos-83.5</string>
+					<string>Cosmos</string>
+					<string>Cosmos-76</string>
+					<string>Cosmos-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -265,9 +265,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconAmethyst</string>
-					<string>IconAmethyst-76</string>
-					<string>IconAmethyst-83.5</string>
+					<string>Amethyst</string>
+					<string>Amethyst-76</string>
+					<string>Amethyst-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -276,9 +276,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconY2KDisc</string>
-					<string>IconY2KDisc-76</string>
-					<string>IconY2KDisc-83.5</string>
+					<string>Y2KDisc</string>
+					<string>Y2KDisc-76</string>
+					<string>Y2KDisc-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -287,9 +287,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconCassette</string>
-					<string>IconCassette-76</string>
-					<string>IconCassette-83.5</string>
+					<string>Cassette</string>
+					<string>Cassette-76</string>
+					<string>Cassette-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -298,9 +298,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconInvincible</string>
-					<string>IconInvincible-76</string>
-					<string>IconInvincible-83.5</string>
+					<string>Invincible</string>
+					<string>Invincible-76</string>
+					<string>Invincible-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>
@@ -309,9 +309,9 @@
 			<dict>
 				<key>CFBundleIconFiles</key>
 				<array>
-					<string>IconBlueprint</string>
-					<string>IconBlueprint-76</string>
-					<string>IconBlueprint-83.5</string>
+					<string>Blueprint</string>
+					<string>Blueprint-76</string>
+					<string>Blueprint-83.5</string>
 				</array>
 				<key>UIPrerenderedIcon</key>
 				<false/>

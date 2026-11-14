@@ -53,25 +53,36 @@ struct SparkSurfaceBackground: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let glass = launcher.settings.liquidGlassEnabled
 
         ZStack {
-            if launcher.settings.liquidGlassEnabled {
+            if glass {
+                // Material first, then a light tint. Keeping the tint under
+                // 0.5 lets the wallpaper and cover art refract through instead
+                // of turning the panel into flat grey.
                 shape.fill(.ultraThinMaterial)
-                shape.fill(fill.opacity(0.30 + 0.42 * intensity))
+                shape.fill(Color(hex: "#121216").opacity(0.45 - 0.25 * intensity))
                 shape.fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.10 * intensity),
+                            Color.white.opacity(0.14 * intensity),
                             Color.clear,
                         ],
                         startPoint: .top,
-                        endPoint: .center
+                        endPoint: UnitPoint(x: 0.5, y: 0.35)
                     )
                 )
             } else {
                 shape.fill(fill)
             }
         }
+        .compositingGroup()
+        .shadow(
+            color: Color.black.opacity(glass ? 0.05 + 0.20 * intensity : 0),
+            radius: glass ? 3 + 10 * intensity : 0,
+            x: 0,
+            y: glass ? 4 : 0
+        )
     }
 }
 
@@ -94,7 +105,7 @@ struct SparkSurfaceBorder: View {
             shape.strokeBorder(
                 LinearGradient(
                     colors: [
-                        Color.white.opacity(0.24 * intensity),
+                        Color.white.opacity(0.30 * intensity),
                         Color.white.opacity(0.06),
                     ],
                     startPoint: .top,

@@ -8,6 +8,7 @@ import Foundation
 enum RuntimeScripts {
 
     static let orderedNames = [
+        "spark-bootstrap",
         "spark-core",
         "spark-nw",
         "spark-audio",

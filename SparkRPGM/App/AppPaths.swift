@@ -35,6 +35,7 @@ enum AppPaths {
     static var internalRoot: URL { documents.appendingPathComponent(".spark", isDirectory: true) }
     static var staging: URL { documents.appendingPathComponent(".staging", isDirectory: true) }
     static var covers: URL { internalRoot.appendingPathComponent("covers", isDirectory: true) }
+    static var autoCovers: URL { internalRoot.appendingPathComponent("auto-covers", isDirectory: true) }
     static var metadataFile: URL { internalRoot.appendingPathComponent("metadata.json") }
     static var nwfsRoot: URL { internalRoot.appendingPathComponent("nwfs", isDirectory: true) }
     static var runtimeCache: URL { internalRoot.appendingPathComponent("runtime", isDirectory: true) }
@@ -52,7 +53,7 @@ enum AppPaths {
 
         var ok = true
         let folders: [URL] = [
-            games, saves, backups, pickerFix, theme, internalRoot, staging, covers, nwfsRoot, runtimeCache,
+            games, saves, backups, pickerFix, theme, internalRoot, staging, covers, autoCovers, nwfsRoot, runtimeCache,
         ]
 
         for folder in folders {
@@ -131,6 +132,21 @@ enum AppPaths {
 
     static func coverFile(forGame name: String, fileExtension: String = "jpg") -> URL {
         covers.appendingPathComponent("\(name).\(fileExtension)")
+    }
+
+    /// Cached auto-detected cover for a game, if one has been captured.
+    static func autoCoverURL(forGame name: String) -> URL? {
+        for fileExtension in ["png", "jpg", "jpeg", "webp"] {
+            let url = autoCovers.appendingPathComponent("\(name).\(fileExtension)")
+            if fileManager.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    static func autoCoverFile(forGame name: String, fileExtension: String) -> URL {
+        autoCovers.appendingPathComponent("\(name).\(fileExtension.lowercased())")
     }
 
     static func stagingFolder() -> URL {

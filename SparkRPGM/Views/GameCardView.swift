@@ -46,16 +46,41 @@ struct CoverImageView: View {
         ZStack {
             SparkSurfaceBackground(cornerRadius: 0, fill: SparkTheme.panelRaised)
 
-            VStack(spacing: 8) {
-                Image(systemName: "square.stack")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundColor(SparkTheme.textTertiary)
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.05),
+                    Color.clear,
+                    Color.black.opacity(0.35),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack(spacing: 9) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.06))
+                        .frame(width: 46, height: 46)
+                    Circle()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        .frame(width: 46, height: 46)
+                    Text(monogram)
+                        .font(.system(size: 19, weight: .semibold, design: .rounded))
+                        .foregroundColor(SparkTheme.textSecondary)
+                }
+
                 Text(game.engine.rawValue)
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(1.2)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(1.1)
                     .foregroundColor(SparkTheme.textTertiary)
             }
         }
+    }
+
+    private var monogram: String {
+        let cleaned = game.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let character = cleaned.first(where: { $0.isLetter || $0.isNumber }) else { return "?" }
+        return String(character).uppercased()
     }
 
     private func load() {
@@ -93,7 +118,6 @@ struct GameCardView: View {
         ZStack(alignment: .bottomLeading) {
             CoverImageView(game: game, maxPixel: cardSize == .large ? 1200 : 800)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(SparkTheme.panelRaised)
 
             LinearGradient(
                 colors: [
@@ -143,7 +167,6 @@ struct GameCardView: View {
             .padding(cardSize == .compact ? 9 : 12)
         }
         .aspectRatio(cardSize.coverAspect, contentMode: .fit)
-        .background(SparkTheme.panelRaised)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .sparkBorder(cornerRadius: cornerRadius)
         .overlay(alignment: .topLeading) {

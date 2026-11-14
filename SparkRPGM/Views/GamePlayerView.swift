@@ -46,10 +46,15 @@ struct GamePlayerView: View {
             }
 
             if let error = session.loadError {
-                errorOverlay(message: error)
+                errorOverlay(message: error, detail: nil)
+            } else if session.didStall {
+                errorOverlay(
+                    message: session.bootDiagnostic ?? "The game did not finish starting.",
+                    detail: diagnosticDetail
+                )
             }
 
-            if showControls, !isEditing {
+            if showControls, !isEditing, !gameFailed {
                 TouchControlsView(
                     config: $controls.config,
                     isEditing: false,
@@ -59,7 +64,7 @@ struct GamePlayerView: View {
                 )
             }
 
-            if isEditing {
+            if isEditing, !gameFailed {
                 TouchControlsView(
                     config: $controls.config,
                     isEditing: true,
@@ -72,11 +77,11 @@ struct GamePlayerView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
-            if showTopBar {
-                topBar
+            if showTopBar, !gameFailed {
+                hudPill
                     .transition(.move(edge: .top).combined(with: .opacity))
-            } else if !isEditing {
-                restoreBarButton
+            } else if !isEditing, !gameFailed, !session.isLoading {
+                restoreHUDChip
             }
         }
         .statusBar(hidden: true)
@@ -98,6 +103,19 @@ struct GamePlayerView: View {
                 store.refreshMetadata()
             }
         }
+    }
+
+    private var gameFailed: Bool {
+        session.loadError != nil || session.didStall
+    }
+
+    private var diagnosticDetail: String? {
+        guard !session.missingResources.isEmpty else { return session.bootDiagnostic }
+        var lines = session.missingResources.suffix(6).map { "Missing file: \($0)" }
+        if let diagnostic = session.bootDiagnostic {
+            lines.insert(diagnostic, at: 0)
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Content
@@ -129,11 +147,31 @@ struct GamePlayerView: View {
                 Text(game.engine.isEasyRPG ? "Starting EasyRPG Player" : "Starting \(game.engine.displayName)")
                     .font(.system(size: 11))
                     .foregroundColor(SparkTheme.textSecondary)
+
+                if let diagnostic = session.bootDiagnostic {
+                    Text(diagnostic)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(SparkTheme.textTertiary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 34)
+                        .padding(.top, 2)
+
+                    HStack(spacing: 10) {
+                        overlayButton("Retry", highlighted: false) {
+                            session.loadGame()
+                        }
+                        overlayButton("Close", highlighted: true) {
+                            close()
+                        }
+                    }
+                    .padding(.top, 4)
+                }
             }
         }
     }
 
-    private func errorOverlay(message: String) -> some View {
+    private func errorOverlay(message: String, detail: String?) -> some View {
         ZStack {
             SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
 
@@ -153,161 +191,150 @@ struct GamePlayerView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 30)
 
+                if let detail = detail, !detail.isEmpty {
+                    ScrollView {
+                        Text(detail)
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundColor(SparkTheme.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(9)
+                    }
+                    .frame(maxWidth: 320, maxHeight: 120)
+                    .background(Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(.horizontal, 26)
+                }
+
                 HStack(spacing: 10) {
-                    Button("Retry") {
+                    overlayButton("Retry", highlighted: false) {
                         session.loadGame()
                     }
-                    .font(.system(size: 13, weight: .medium))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 9)
-                    .background(Color.white.opacity(0.08))
-                    .foregroundColor(SparkTheme.textPrimary)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                    Button("Close") {
+                    overlayButton("Close", highlighted: true) {
                         close()
                     }
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 9)
-                    .foregroundColor(launcher.settings.highlightPrimaryButtons ? Color.white : SparkTheme.textPrimary)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(launcher.settings.highlightPrimaryButtons ? accent : Color.white.opacity(0.08))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(
-                                launcher.settings.highlightPrimaryButtons ? Color.clear : SparkTheme.hairline,
-                                lineWidth: SparkTheme.hairlineWidth
-                            )
-                    )
                 }
             }
         }
     }
 
-    // MARK: - Top bar
+    private func overlayButton(_ title: String, highlighted: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: highlighted ? .semibold : .medium))
+                .padding(.horizontal, 18)
+                .padding(.vertical, 9)
+                .foregroundColor(highlighted && launcher.settings.highlightPrimaryButtons ? Color.white : SparkTheme.textPrimary)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(highlighted && launcher.settings.highlightPrimaryButtons ? accent : Color.white.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(
+                            highlighted && launcher.settings.highlightPrimaryButtons ? Color.clear : SparkTheme.hairline,
+                            lineWidth: SparkTheme.hairlineWidth
+                        )
+                )
+        }
+    }
 
-    private var topBar: some View {
+    // MARK: - HUD
+
+    /// Compact floating capsule: Back, Speed, Controls, Hide. Sits centred at
+    /// the top instead of spanning the screen.
+    private var hudPill: some View {
         VStack {
-            HStack(spacing: 8) {
-                Button(action: close) {
-                    barIcon("chevron.left")
-                }
+            HStack(spacing: 2) {
+                hudButton("chevron.left", action: close)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(game.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(SparkTheme.textPrimary)
-                        .lineLimit(1)
-                    Text(game.engine.displayName)
-                        .font(.system(size: 9, weight: .regular))
-                        .foregroundColor(SparkTheme.textSecondary)
-                }
-
-                Spacer(minLength: 6)
+                Rectangle()
+                    .fill(Color.white.opacity(0.10))
+                    .frame(width: 0.5, height: 15)
+                    .padding(.horizontal, 2)
 
                 if !game.engine.isMKXP {
-                    Button(action: cycleSpeed) {
-                        Text("\(speedMultiplier)×")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 30, height: 30)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(speedMultiplier > 1 ? accent : Color.white.opacity(0.08))
-                            )
-                            .foregroundColor(SparkTheme.textPrimary)
-                    }
-                    .accessibilityLabel("Game speed")
-                    .accessibilityValue("\(speedMultiplier) times")
+                    speedButton
                 }
 
-                Button(action: cycleOrientation) {
-                    barIcon(controls.config.orientation.symbolName)
-                }
-
-                Button(action: { session.reload() }) {
-                    barIcon("arrow.clockwise")
-                }
-
-                Button {
+                hudButton("slider.horizontal.3", active: isEditing) {
                     withAnimation(.easeOut(duration: 0.2)) {
                         isEditing.toggle()
                     }
-                } label: {
-                    barIcon("slider.horizontal.3", active: isEditing)
                 }
 
-                Button {
+                hudButton("eye.slash") {
                     withAnimation(.easeOut(duration: 0.2)) {
                         showTopBar = false
                         showControls = false
                     }
-                } label: {
-                    barIcon("eye.slash")
                 }
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .frame(width: 180)
             .background(
-                ZStack {
-                    BlurView(style: .systemThinMaterialDark)
-                    Color.black.opacity(0.30)
-                }
+                Capsule(style: .continuous)
+                    .fill(Color(hex: "141418").opacity(0.75))
             )
-            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(Color.white.opacity(0.10), lineWidth: SparkTheme.hairlineWidth)
+                Capsule(style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
             )
-            .padding(.horizontal, 14)
             .padding(.top, 8)
 
             Spacer()
         }
     }
 
-    private func barIcon(_ name: String, active: Bool = false) -> some View {
-        Image(systemName: name)
-            .font(.system(size: 12, weight: .semibold))
-            .frame(width: 30, height: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(active ? accent : Color.white.opacity(0.08))
-            )
-            .foregroundColor(SparkTheme.textPrimary)
+    private var speedButton: some View {
+        Button(action: cycleSpeed) {
+            Text("\(speedMultiplier)×")
+                .font(.system(size: 10.5, weight: .semibold))
+                .frame(width: 30, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(speedMultiplier > 1 ? accent.opacity(0.85) : Color.white.opacity(0.05))
+                )
+                .foregroundColor(SparkTheme.textPrimary)
+        }
+        .accessibilityLabel("Game speed")
+        .accessibilityValue("\(speedMultiplier) times")
     }
 
-    private var restoreBarButton: some View {
+    private func hudButton(_ name: String, active: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: name)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 30, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(active ? accent.opacity(0.85) : Color.white.opacity(0.05))
+                )
+                .foregroundColor(SparkTheme.textPrimary)
+        }
+    }
+
+    private var restoreHUDChip: some View {
         VStack {
-            HStack {
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        showTopBar = true
-                        showControls = true
-                    }
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Show")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(SparkTheme.textSecondary)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.40))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color.white.opacity(0.12), lineWidth: SparkTheme.hairlineWidth)
-                    )
+            Button {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    showTopBar = true
+                    showControls = true
                 }
-                .padding(.leading, 14)
-                .padding(.top, 10)
-                Spacer()
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(SparkTheme.textSecondary)
+                    .frame(width: 34, height: 22)
+                    .background(Capsule(style: .continuous).fill(Color(hex: "141418").opacity(0.72)))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                    )
             }
+            .accessibilityLabel("Show controls")
+            .padding(.top, 8)
+
             Spacer()
         }
     }
@@ -387,6 +414,19 @@ struct GamePlayerView: View {
                         .pickerStyle(SegmentedPickerStyle())
 
                         HStack(spacing: 8) {
+                            Button("Reload") {
+                                session.reload()
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    isEditing = false
+                                }
+                            }
+                            .font(.system(size: 12, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Color.white.opacity(0.06))
+                            .foregroundColor(SparkTheme.textSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
                             Button("Reset") {
                                 controls.reset()
                             }
@@ -500,14 +540,6 @@ struct GamePlayerView: View {
         if let secondary = action.secondaryKeyCode {
             session.sendKey(type: type, key: action.key, keyCode: secondary, button: action.rpgmButton)
         }
-    }
-
-    private func cycleOrientation() {
-        let modes = OrientationMode.allCases
-        let index = modes.firstIndex(of: controls.config.orientation) ?? 0
-        let next = modes[(index + 1) % modes.count]
-        controls.config.orientation = next
-        OrientationManager.shared.apply(next)
     }
 
     /// 1x → 2x → 3x → 1x. Applied live through `window.__sparkSetSpeed`.

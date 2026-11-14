@@ -1037,11 +1037,18 @@
 
   // MARK: - Install globals
 
-  if (typeof window.require !== 'function') window.require = localRequire;
-  if (!window.process) window.process = processStub;
-  if (!window.global) window.global = window;
-  if (!window.Buffer) window.Buffer = SparkBuffer;
-  if (!window.nw) window.nw = { gui: nwGui, Window: nwGui.Window, App: nwGui.App, Shell: nwGui.Shell };
+  // Some webviews expose a read-only `process`/`nw`; a failed assignment must
+  // degrade quietly instead of aborting the whole shim.
+  try { if (typeof window.require !== 'function') window.require = localRequire; } catch (error) { log('require install failed: ' + error); }
+  try { if (!window.process) window.process = processStub; } catch (error) { log('process install failed: ' + error); }
+  try { if (!window.global) window.global = window; } catch (error) { log('global install failed: ' + error); }
+  try { if (!window.Buffer) window.Buffer = SparkBuffer; } catch (error) { log('Buffer install failed: ' + error); }
+  try {
+    if (!window.nw) {
+      window.nw = { gui: nwGui, Window: nwGui.Window, App: nwGui.App, Shell: nwGui.Shell };
+    }
+  } catch (error) { log('nw install failed: ' + error); }
+  window.__sparkNwShim = true;
 
   Spark.require = window.require;
   Spark.fs = fs;

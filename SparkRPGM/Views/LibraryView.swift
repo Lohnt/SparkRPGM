@@ -460,15 +460,21 @@ struct LibraryView: View {
     @ViewBuilder
     private var importBanner: some View {
         if coordinator.isShowingProgress, let job = coordinator.activeJob {
-            VStack {
-                Spacer()
-                ImportBanner(job: job, activeCount: coordinator.activeCount)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 22)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            ZStack {
+                Color.black.opacity(0.45)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+
+                ImportProgressCard(
+                    job: job,
+                    activeCount: coordinator.activeCount,
+                    accent: accent
+                ) {
+                    coordinator.cancel(jobID: job.id)
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
-            .animation(.easeOut(duration: 0.2))
-            .allowsHitTesting(false)
+            .animation(.easeOut(duration: 0.22))
         }
     }
 

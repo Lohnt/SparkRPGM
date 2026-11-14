@@ -24,11 +24,18 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var loadError: String?
     @Published private(set) var contextLost = false
+    /// Last JavaScript exception or failed script reported by the bootstrap.
+    @Published private(set) var bootDiagnostic: String?
+    /// Files the scheme handler could not resolve, newest last (capped).
+    @Published private(set) var missingResources: [String] = []
+    /// Set by the watchdog when the game has not signalled readiness in time.
+    @Published private(set) var didStall = false
 
     private(set) var webView: WKWebView!
     private let resolver: CaseInsensitiveFileResolver
     private var didSetup = false
     private var lastReadyAt = Date.distantPast
+    private var stallWorkItem: DispatchWorkItem?
     /// 1x / 2x / 3x requested from the in-game top bar. Kept here so a reload
     /// or a web-process restart re-applies it to the fresh page.
     private var speedMultiplier = 1
@@ -38,9 +45,12 @@ final class GameSession: NSObject, ObservableObject {
         self.entry = entry
         self.context = GameWebContext(game: game)
         self.resolver = CaseInsensitiveFileResolver(root: game.rootURL)
-        self.schemeHandler = RPGMSchemeHandler(gameRoot: game.rootURL)
+        self.schemeHandler = RPGMSchemeHandler(gameRoot: game.rootURL, entryPath: game.entryPath)
         super.init()
         bridge.session = self
+        schemeHandler.onMissingResource = { [weak self] path in
+            self?.recordMissingResource(path)
+        }
         AppPaths.ensureSaveFolder(forGame: game.folderName)
     }
 
@@ -66,11 +76,18 @@ final class GameSession: NSObject, ObservableObject {
         configuration.mediaTypesRequiringUserActionForPlayback = []
         configuration.suppressesIncrementalRendering = false
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.preferences.javaScriptEnabled = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
+        // File access only matters for file:// probes some plugins perform.
+        // The setter is private on iOS, so apply it through guarded KVC and
+        // ignore the key entirely where the class does not expose it.
+        sparkSetIfAvailable(configuration.preferences, key: "allowFileAccessFromFileURLs", value: true)
+        sparkSetIfAvailable(configuration.preferences, key: "allowUniversalAccessFromFileURLs", value: true)
 
         let controller = configuration.userContentController
         controller.add(bridge, name: "sparkLog")
         controller.add(bridge, name: "sparkReady")
+        controller.add(bridge, name: "sparkError")
         controller.add(bridge, name: "sparkContextLost")
         controller.add(bridge, name: "saveBridge")
         controller.add(bridge, name: "fsBridge")
@@ -142,6 +159,10 @@ final class GameSession: NSObject, ObservableObject {
         isLoading = true
         loadError = nil
         contextLost = false
+        bootDiagnostic = nil
+        missingResources = []
+        didStall = false
+        armStallWatchdog()
         var request = URLRequest(url: entryURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         webView.load(request)
@@ -149,8 +170,44 @@ final class GameSession: NSObject, ObservableObject {
 
     func reload() {
         resolver.invalidate()
-        webView?.reload()
         isLoading = true
+        loadError = nil
+        bootDiagnostic = nil
+        missingResources = []
+        didStall = false
+        armStallWatchdog()
+        webView?.reload()
+    }
+
+    private func armStallWatchdog() {
+        stallWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isLoading else { return }
+            self.didStall = true
+        }
+        stallWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: item)
+    }
+
+    private func clearStallWatchdog() {
+        stallWorkItem?.cancel()
+        stallWorkItem = nil
+    }
+
+    private static let fatalResourceExtensions: Set<String> = ["js", "mjs", "html", "htm", "json", "wasm"]
+
+    private func recordMissingResource(_ path: String) {
+        if !missingResources.contains(path) {
+            if missingResources.count >= 12 { missingResources.removeFirst() }
+            missingResources.append(path)
+        }
+        // A missing sound or sprite is survivable; a missing script, data file
+        // or wasm module is what actually stops a boot. Only the latter raises
+        // the error state, while the full list still feeds the stall report.
+        let fileExtension = (path as NSString).pathExtension.lowercased()
+        if bootDiagnostic == nil, Self.fatalResourceExtensions.contains(fileExtension) {
+            bootDiagnostic = "Missing file: \(path)"
+        }
     }
 
     /// Sets the in-game speed multiplier (clamped to 1–3).
@@ -174,9 +231,10 @@ final class GameSession: NSObject, ObservableObject {
     }
 
     func stop() {
+        clearStallWatchdog()
         webView?.stopLoading()
         let controller = webView?.configuration.userContentController
-        for name in ["sparkLog", "sparkReady", "sparkContextLost", "saveBridge", "fsBridge"] {
+        for name in ["sparkLog", "sparkReady", "sparkError", "sparkContextLost", "saveBridge", "fsBridge"] {
             controller?.removeScriptMessageHandler(forName: name)
         }
         webView?.navigationDelegate = nil
@@ -245,8 +303,13 @@ final class GameSession: NSObject, ObservableObject {
             if Date().timeIntervalSince(lastReadyAt) > 0.3 {
                 lastReadyAt = Date()
                 isLoading = false
+                didStall = false
+                clearStallWatchdog()
                 if speedMultiplier > 1 { applySpeed() }
             }
+
+        case "sparkError":
+            handleSparkError(message.body)
 
         case "sparkContextLost":
             contextLost = true
@@ -263,6 +326,35 @@ final class GameSession: NSObject, ObservableObject {
         default:
             break
         }
+    }
+
+    // MARK: - Boot diagnostics
+
+    private func handleSparkError(_ body: Any) {
+        guard let payload = body as? [String: Any] else {
+            Log.web(String(describing: body))
+            return
+        }
+
+        let kind = (payload["kind"] as? String)?.lowercased() ?? "error"
+        let message = payload["message"] as? String ?? "Unknown error"
+        let source = payload["source"] as? String ?? ""
+        let line = payload["line"] as? Int ?? 0
+
+        if kind == "info" {
+            Log.web("boot: \(message)")
+            return
+        }
+
+        var text = message
+        if !source.isEmpty {
+            text += " (\(source)\(line > 0 ? ":\(line)" : ""))"
+        }
+        Log.error("Game boot \(kind): \(text)")
+
+        // A stall report is only a hint; keep any concrete exception visible.
+        if kind == "stall", bootDiagnostic != nil { return }
+        bootDiagnostic = text
     }
 
     // MARK: - Native disk save bridge
@@ -481,20 +573,28 @@ final class GameSession: NSObject, ObservableObject {
 extension GameSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        isLoading = false
         if speedMultiplier > 1 { applySpeed() }
+        // MZ/MV only clear the overlay on `sparkReady`; a finished document with
+        // a failed script is exactly the case we want to keep visible.
+        if entry == .easyRPGHost || !game.engine.isWebBased {
+            isLoading = false
+            didStall = false
+            clearStallWatchdog()
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
         loadError = error.localizedDescription
         isLoading = false
+        clearStallWatchdog()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
         loadError = error.localizedDescription
         isLoading = false
+        clearStallWatchdog()
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -502,6 +602,10 @@ extension GameSession: WKNavigationDelegate {
         // A gentle reload restores the game instead of showing a dead canvas.
         Log.app("Web content process terminated; reloading \(game.folderName)")
         isLoading = true
+        bootDiagnostic = nil
+        missingResources = []
+        didStall = false
+        armStallWatchdog()
         webView.reload()
     }
 
@@ -619,4 +723,13 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         session?.handle(message: message)
     }
+}
+
+/// Applies a KVC key only when the object exposes the matching setter, so a
+/// private WebKit key can never raise an Objective-C exception.
+private func sparkSetIfAvailable(_ object: NSObject, key: String, value: Any) {
+    let suffix = key.prefix(1).uppercased() + key.dropFirst()
+    let selector = NSSelectorFromString("set\(suffix):")
+    guard object.responds(to: selector) else { return }
+    object.setValue(value, forKey: key)
 }

@@ -85,7 +85,18 @@ final class GameStore: ObservableObject {
             let engineRoot = entryPath.isEmpty ? folder : folder.appendingPathComponent(entryPath, isDirectory: true)
             let customCover = AppPaths.coverFile(forGame: name)
             let hasCustomCover = fileManager.fileExists(atPath: customCover.path)
-            let cover = hasCustomCover ? customCover : Self.discoverCover(in: engineRoot, engine: engine)
+
+            let cover: URL?
+            if hasCustomCover {
+                cover = customCover
+            } else if let cached = AppPaths.autoCoverURL(forGame: name) {
+                cover = cached
+            } else if let found = GameCoverFinder.find(inGameRoot: folder, engineRoot: engineRoot) {
+                // Cache once so the grid never re-walks the game on every scan.
+                cover = GameCoverFinder.cache(candidate: found, forGame: name) ?? found
+            } else {
+                cover = Self.discoverCover(in: engineRoot, engine: engine)
+            }
 
             // Cache the detection result so the next launch is instant.
             if meta.engine != engine.rawValue || meta.entryPath != entryPath {
@@ -197,6 +208,7 @@ final class GameStore: ObservableObject {
             try? fileManager.removeItem(at: AppPaths.coverFile(forGame: folderName))
             try? fileManager.moveItem(at: oldCover, to: AppPaths.coverFile(forGame: folderName))
         }
+        GameCoverFinder.move(from: game.folderName, to: folderName)
 
         metadata.move(from: game.folderName, to: folderName)
         metadata.update(folderName) { value in
@@ -222,6 +234,7 @@ final class GameStore: ObservableObject {
         if fileManager.fileExists(atPath: cover.path) {
             try? fileManager.removeItem(at: cover)
         }
+        GameCoverFinder.clear(forGame: game.folderName)
         metadata.remove(game.folderName)
         games.removeAll { $0.folderName == game.folderName }
         toast("Deleted \(game.title)")

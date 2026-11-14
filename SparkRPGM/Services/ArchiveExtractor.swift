@@ -47,6 +47,23 @@ enum ArchiveError: LocalizedError {
     }
 }
 
+/// Coarse stages of an import, shown as the headline in the progress card.
+enum ImportPhase: String {
+    case scanning
+    case extracting
+    case configuring
+    case finishing
+
+    var title: String {
+        switch self {
+        case .scanning: return "Scanning archive..."
+        case .extracting: return "Extracting files..."
+        case .configuring: return "Configuring engine..."
+        case .finishing: return "Finishing up..."
+        }
+    }
+}
+
 /// Streams .zip/.apk/.7z/.rar archives straight onto disk.
 ///
 /// - ZIP (including APK) uses ZIPFoundation, which streams entries from disk
@@ -59,6 +76,9 @@ final class ArchiveExtractor {
     struct Progress {
         var fraction: Double?
         var status: String
+        var completedFiles: Int = 0
+        var totalFiles: Int = 0
+        var phase: ImportPhase = .extracting
     }
 
     typealias ProgressHandler = (Progress) -> Void
@@ -116,7 +136,11 @@ final class ArchiveExtractor {
         }
 
         let format = detectFormat(for: archiveURL)
-        progress(Progress(fraction: 0, status: "Opening \(format.displayName) archive…"))
+        progress(Progress(
+            fraction: 0,
+            status: "Opening \(format.displayName) archive",
+            phase: .scanning
+        ))
 
         switch format {
         case .zip:
@@ -136,7 +160,13 @@ final class ArchiveExtractor {
 
         let count = countItems(in: destination)
         guard count > 0 else { throw ArchiveError.emptyArchive }
-        progress(Progress(fraction: 1, status: "Extracted \(count) files"))
+        progress(Progress(
+            fraction: 1,
+            status: "Extracted \(count) files",
+            completedFiles: count,
+            totalFiles: count,
+            phase: .extracting
+        ))
     }
 
     // MARK: - ZIP / APK
@@ -148,9 +178,84 @@ final class ArchiveExtractor {
         progress: @escaping ProgressHandler
     ) throws {
         guard !token.isCancelled else { throw ArchiveError.cancelled }
-        progress(Progress(fraction: nil, status: "Extracting ZIP (streaming)…"))
+        progress(Progress(fraction: nil, status: "Reading archive index", phase: .scanning))
+
+        // `try?` works whether the ZIPFoundation initialiser is throwing
+        // (0.9.16+) or failable (older releases).
+        guard let archive = try? Archive(url: archiveURL, accessMode: .read) else {
+            try legacyUnzip(archiveURL: archiveURL, destination: destination, token: token, progress: progress)
+            return
+        }
+
+        let entries = Array(archive)
+        guard !entries.isEmpty else { throw ArchiveError.emptyArchive }
+        let total = entries.count
+        let fileManager = FileManager.default
+        var extracted = 0
+
+        for entry in entries {
+            if token.isCancelled { throw ArchiveError.cancelled }
+
+            guard let relative = ArchivePathSanitizer.safeRelativePath(for: entry.path) else { continue }
+            let target = ArchivePathSanitizer.destinationURL(root: destination, relativePath: relative)
+
+            switch entry.type {
+            case .directory:
+                try fileManager.createDirectory(at: target, withIntermediateDirectories: true, attributes: nil)
+
+            case .file:
+                try fileManager.createDirectory(
+                    at: target.deletingLastPathComponent(),
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+                if fileManager.fileExists(atPath: target.path) {
+                    try? fileManager.removeItem(at: target)
+                }
+                guard fileManager.createFile(atPath: target.path, contents: nil, attributes: nil),
+                      let handle = try? FileHandle(forWritingTo: target) else {
+                    throw ArchiveError.corrupt("Could not create \(relative)")
+                }
+                do {
+                    _ = try archive.extract(entry, skipCRC32: false) { data in
+                        try handle.write(contentsOf: data)
+                    }
+                    try handle.close()
+                } catch {
+                    try? handle.close()
+                    if token.isCancelled { throw ArchiveError.cancelled }
+                    throw ArchiveError.corrupt("Could not extract \(relative): \(error.localizedDescription)")
+                }
+
+            case .symlink:
+                continue
+            }
+
+            extracted += 1
+            if extracted % 5 == 0 || extracted == total {
+                progress(Progress(
+                    fraction: 0.05 + 0.9 * Double(extracted) / Double(max(total, 1)),
+                    status: "Extracting \(extracted) of \(total)",
+                    completedFiles: extracted,
+                    totalFiles: total,
+                    phase: .extracting
+                ))
+            }
+        }
+
+        guard !token.isCancelled else { throw ArchiveError.cancelled }
+    }
+
+    /// Fallback for archives ZIPFoundation refuses to open as an object but
+    /// `FileManager` can still stream.
+    private static func legacyUnzip(
+        archiveURL: URL,
+        destination: URL,
+        token: ImportCancellationToken,
+        progress: @escaping ProgressHandler
+    ) throws {
+        progress(Progress(fraction: nil, status: "Extracting ZIP (streaming)", phase: .extracting))
         do {
-            // ZIPFoundation streams entries directly from disk to disk.
             try FileManager.default.unzipItem(at: archiveURL, to: destination)
         } catch {
             if token.isCancelled { throw ArchiveError.cancelled }
@@ -216,7 +321,10 @@ final class ArchiveExtractor {
             if index % 25 == 0 || index == entries.count - 1 {
                 progress(Progress(
                     fraction: 0.05 + 0.9 * Double(index + 1) / Double(total),
-                    status: "Extracting 7-Zip (\(index + 1)/\(entries.count))"
+                    status: "Extracting \(index + 1) of \(entries.count)",
+                    completedFiles: index + 1,
+                    totalFiles: entries.count,
+                    phase: .extracting
                 ))
             }
         }
@@ -275,7 +383,10 @@ final class ArchiveExtractor {
             if index % 10 == 0 || index == entries.count - 1 {
                 progress(Progress(
                     fraction: 0.05 + 0.9 * Double(index + 1) / Double(total),
-                    status: "Extracting RAR (\(index + 1)/\(entries.count))"
+                    status: "Extracting \(index + 1) of \(entries.count)",
+                    completedFiles: index + 1,
+                    totalFiles: entries.count,
+                    phase: .extracting
                 ))
             }
         }

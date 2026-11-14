@@ -4,7 +4,7 @@ import CoreGraphics
 /// Every virtual button and the exact `keyCode` RPG Maker listens for.
 enum ControlAction: String, CaseIterable, Identifiable {
     case up, down, left, right
-    case ok, cancel, shift, control
+    case ok, cancel, shift, control, escape
 
     var id: String { rawValue }
 
@@ -20,6 +20,7 @@ enum ControlAction: String, CaseIterable, Identifiable {
         case .cancel: return "x"
         case .shift: return "Shift"
         case .control: return "Control"
+        case .escape: return "Escape"
         }
     }
 
@@ -33,14 +34,15 @@ enum ControlAction: String, CaseIterable, Identifiable {
         case .cancel: return 88  // X
         case .shift: return 16
         case .control: return 17
+        case .escape: return 27  // Escape / menu
         }
     }
 
-    /// Secondary keyCode so games that only listen for Enter/Escape still work.
+    /// Secondary keyCode so games that only listen for Enter still confirm.
+    /// Escape lives on its own action now, so X no longer opens the menu too.
     var secondaryKeyCode: Int? {
         switch self {
         case .ok: return 13       // Enter
-        case .cancel: return 27   // Escape
         default: return nil
         }
     }
@@ -53,6 +55,7 @@ enum ControlAction: String, CaseIterable, Identifiable {
         case .cancel: return "cancel"
         case .shift: return "shift"
         case .control: return "control"
+        case .escape: return "escape"
         }
     }
 }

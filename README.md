@@ -74,25 +74,50 @@ README.txt                   short in-app help
 Drop an archive anywhere in this folder and import it, or copy an already
 extracted game into `games/` and pull down to rescan the library.
 
-Hidden scaffolding lives in `.spark/` (metadata, custom covers, nw.js write
-overlay) and `.staging/` (temporary extraction space).
+Hidden scaffolding lives in `.spark/` (`metadata.json` with titles, covers,
+playtime and line colours; custom covers; the nw.js write overlay) and
+`.staging/` (temporary extraction space).
 
 ## Library
 
-* Dark grid with cover art discovered from the game data, an engine badge and
-  the install size.
-* Search and engine filter chips; sorting by name, recently played or size.
-* Long‑press a card for **Rename**, **Set Custom Cover**, **Remove Custom Cover**,
-  **Backup Saves** and **Delete**.
-* Pull down to rescan `Documents/games`.
+Two library styles, switchable from the top bar or from **Paintbrush**:
+
+* **Spark Lines** — a fast, text‑first list with no cover art. Every row has a
+  4 pt coloured accent line, the title, an engine badge, disk size and play
+  time.
+* **Prism Icons** — a multi‑column cover grid (Compact / Standard / Large
+  cards) with artwork or an engine fallback badge.
+
+Both styles show `size • playtime` (for example `4.2 GB • 3h 20m`, or
+`4.2 GB • Unplayed`). Search and engine filter chips, plus sorting by name,
+recently played, most played or size.
+
+Long‑press a game for **Rename**, **Set Custom Cover**, **Remove Custom Cover**,
+**Change Line Color**, **Backup Saves** and **Delete**. Pull down to rescan
+`Documents/games`.
+
+### Playtime
+
+Foreground session time is accumulated while a game is open (paused whenever
+the app leaves the foreground) and flushed to `Documents/.spark/metadata.json`
+every 45 seconds, on pause and on exit.
+
+### Accent line colours
+
+The launcher‑wide line colour supports presets, a full `ColorPicker`, or
+**Auto-colour by engine** (MV blue, MZ green, 2000 gold, XP purple…). Any single
+game can override it from its long‑press menu → **Change Line Color**; the
+override is stored as `accentColorHex` in the game's metadata.
 
 ## Launcher customization
 
 **Paintbrush** opens the appearance panel:
 
+* library style (Spark Lines / Prism Icons) and sort order;
 * wallpaper from Photos or Files, background blur (0–30), dim overlay (0–85 %);
 * card glass opacity, card size (Compact / Standard / Large);
 * editable header title, 8 accent presets plus a full `ColorPicker`;
+* accent line presets, custom colour and auto‑colour‑by‑engine;
 * app icon switcher (Default / Midnight / Retro / Crimson / Neon / Minimal);
 * one‑tap reset.
 

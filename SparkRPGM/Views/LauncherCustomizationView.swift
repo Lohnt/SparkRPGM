@@ -31,6 +31,7 @@ struct LauncherCustomizationView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         headerSection
                         accentSection
+                        accentLineSection
                         layoutSection
                         wallpaperSection
                         AppIconPickerView()
@@ -147,25 +148,122 @@ struct LauncherCustomizationView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
+    private var accentLineSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Accent Line")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.7))
+
+            Text("The 4pt bar on the left edge of every Spark Lines row.")
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.35))
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                ForEach(Array(LauncherSettings.linePresets.prefix(7)), id: \.self) { hex in
+                    Button {
+                        launcher.settings.accentLineHex = hex
+                        launcher.settings.accentLineAutoByEngine = false
+                    } label: {
+                        Circle()
+                            .fill(Color(hex: hex))
+                            .frame(width: 26, height: 26)
+                            .overlay(
+                                Circle().stroke(
+                                    Color.white.opacity(
+                                        !launcher.settings.accentLineAutoByEngine
+                                            && launcher.settings.accentLineHex.lowercased() == hex.lowercased()
+                                            ? 0.95 : 0.12
+                                    ),
+                                    lineWidth: 2
+                                )
+                            )
+                    }
+                }
+            }
+
+            ColorPicker(
+                "Custom line colour",
+                selection: Binding(
+                    get: { Color(hex: launcher.settings.accentLineHex) },
+                    set: {
+                        launcher.settings.accentLineHex = $0.hexString
+                        launcher.settings.accentLineAutoByEngine = false
+                    }
+                ),
+                supportsOpacity: false
+            )
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.7))
+            .disabled(launcher.settings.accentLineAutoByEngine)
+            .opacity(launcher.settings.accentLineAutoByEngine ? 0.4 : 1)
+
+            Toggle(isOn: binding(\.accentLineAutoByEngine)) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Auto-colour by engine")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.white.opacity(0.8))
+                    Text("MV blue, MZ green, 2000 gold, XP purple…")
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+            }
+            .toggleStyle(SwitchToggleStyle(tint: launcher.settings.accentColor))
+
+            Text("A game can override this from its long-press menu → Change Line Color.")
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.35))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
     private var layoutSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Library Layout")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.white.opacity(0.7))
 
-            Picker("Card size", selection: binding(\.cardSize)) {
-                ForEach(CardSize.allCases) { size in
-                    Text(size.title).tag(size)
+            Picker("Library style", selection: binding(\.viewStyle)) {
+                ForEach(LibraryViewStyle.allCases) { style in
+                    Text(style.title).tag(style)
                 }
             }
             .pickerStyle(SegmentedPickerStyle())
 
-            Picker("Sort", selection: binding(\.sort)) {
-                ForEach(LibrarySort.allCases) { sort in
-                    Text(sort.title).tag(sort)
-                }
+            HStack(spacing: 6) {
+                Image(systemName: launcher.settings.viewStyle.symbolName)
+                    .font(.system(size: 10))
+                    .foregroundColor(launcher.settings.accentColor)
+                Text(launcher.settings.viewStyle.subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
             }
-            .pickerStyle(SegmentedPickerStyle())
+
+            if launcher.settings.viewStyle == .prismIcons {
+                Picker("Card size", selection: binding(\.cardSize)) {
+                    ForEach(CardSize.allCases) { size in
+                        Text(size.title).tag(size)
+                    }
+                }
+                .pickerStyle(SegmentedPickerStyle())
+            }
+
+            HStack {
+                Text("Sort")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                Spacer()
+                Picker("Sort", selection: binding(\.sort)) {
+                    ForEach(LibrarySort.allCases) { sort in
+                        Text(sort.title).tag(sort)
+                    }
+                }
+                .pickerStyle(MenuPickerStyle())
+                .accentColor(launcher.settings.accentColor)
+            }
 
             Text("Card glass opacity")
                 .font(.system(size: 11, weight: .medium))

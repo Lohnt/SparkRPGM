@@ -91,7 +91,9 @@ final class GameStore: ObservableObject {
                 engine: engine,
                 entryPath: entryPath,
                 byteSize: meta.byteSize ?? 0,
-                lastPlayed: meta.lastPlayed,
+                lastPlayed: meta.lastPlayedAt,
+                playSeconds: meta.playTimeSeconds ?? 0,
+                lineColorHex: meta.accentColorHex,
                 hasCustomCover: hasCustomCover,
                 coverURL: cover,
                 importedAt: meta.importedAt
@@ -125,9 +127,36 @@ final class GameStore: ObservableObject {
 
     func markPlayed(_ game: Game) {
         let now = Date()
-        metadata.update(game.folderName) { $0.lastPlayed = now }
+        metadata.update(game.folderName) { $0.lastPlayedAt = now }
         if let index = games.firstIndex(where: { $0.folderName == game.folderName }) {
             games[index].lastPlayed = now
+        }
+    }
+
+    /// Re-reads the (already persisted) per-game metadata after a play session.
+    /// Cheap enough to call on every player dismissal — no directory walk.
+    func refreshMetadata() {
+        let snapshot = metadata.all()
+        var updated = games
+        var changed = false
+        for index in updated.indices {
+            guard let meta = snapshot[updated[index].folderName] else { continue }
+            let play = meta.playTimeSeconds ?? 0
+            if updated[index].playSeconds != play { updated[index].playSeconds = play; changed = true }
+            if updated[index].lastPlayed != meta.lastPlayedAt { updated[index].lastPlayed = meta.lastPlayedAt; changed = true }
+            if updated[index].lineColorHex != meta.accentColorHex {
+                updated[index].lineColorHex = meta.accentColorHex
+                changed = true
+            }
+        }
+        if changed { games = updated }
+    }
+
+    /// `nil` clears the per-game override and falls back to the launcher colour.
+    func setLineColor(_ hex: String?, for game: Game) {
+        metadata.update(game.folderName) { $0.accentColorHex = hex }
+        if let index = games.firstIndex(where: { $0.folderName == game.folderName }) {
+            games[index].lineColorHex = hex
         }
     }
 

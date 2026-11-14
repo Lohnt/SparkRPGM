@@ -82,11 +82,13 @@ struct GameCardView: View {
     let cardSize: CardSize
     let glassOpacity: Double
     let accent: Color
+    let lineColor: Color
 
     var onOpen: () -> Void
     var onRename: () -> Void
     var onSetCover: () -> Void
     var onRemoveCover: () -> Void
+    var onChangeLineColor: () -> Void
     var onBackup: () -> Void
     var onDelete: () -> Void
 
@@ -112,11 +114,21 @@ struct GameCardView: View {
                 HStack(spacing: 6) {
                     EngineBadge(engine: game.engine, compact: cardSize == .compact)
                     if cardSize != .compact {
-                        Text(game.formattedSize)
+                        Text(game.statsLine)
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.white.opacity(0.6))
+                            .foregroundColor(.white.opacity(0.62))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     Spacer(minLength: 0)
+                }
+
+                if cardSize == .compact {
+                    Text(game.statsLine)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
                 }
             }
             .padding(cardSize == .compact ? 9 : 12)
@@ -128,13 +140,21 @@ struct GameCardView: View {
             RoundedRectangle(cornerRadius: cardSize == .compact ? 14 : 18, style: .continuous)
                 .stroke(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.16), accent.opacity(0.18), Color.white.opacity(0.04)],
+                        colors: [lineColor.opacity(0.55), accent.opacity(0.18), Color.white.opacity(0.04)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
                     lineWidth: 1
                 )
         )
+        .overlay(alignment: .topLeading) {
+            Capsule()
+                .fill(lineColor)
+                .frame(width: 26, height: 3)
+                .padding(.leading, cardSize == .compact ? 10 : 12)
+                .padding(.top, cardSize == .compact ? 10 : 12)
+                .shadow(color: lineColor.opacity(0.8), radius: 4, x: 0, y: 0)
+        }
         .shadow(color: Color.black.opacity(0.45), radius: 12, x: 0, y: 8)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .onTapGesture(perform: onOpen)
@@ -152,6 +172,9 @@ struct GameCardView: View {
                 Button(action: onRemoveCover) {
                     Label("Remove Custom Cover", systemImage: "photo.badge.arrow.down")
                 }
+            }
+            Button(action: onChangeLineColor) {
+                Label("Change Line Color", systemImage: "paintpalette")
             }
             Button(action: onBackup) {
                 Label("Backup Saves", systemImage: "externaldrive.badge.timemachine")

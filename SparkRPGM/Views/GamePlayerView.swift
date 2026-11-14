@@ -6,10 +6,12 @@ struct GamePlayerView: View {
     let game: Game
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: GameStore
 
     @StateObject private var session: GameSession
     @StateObject private var controls: ControlSettingsStore
+    @StateObject private var playtime: PlaytimeTracker
 
     @State private var showTopBar = true
     @State private var showControls = true
@@ -24,6 +26,7 @@ struct GamePlayerView: View {
         let entry: GameSession.Entry = game.engine.isEasyRPG ? .easyRPGHost : .gameIndex
         _session = StateObject(wrappedValue: GameSession(game: game, entry: entry))
         _controls = StateObject(wrappedValue: ControlSettingsStore(gameFolder: game.folderName))
+        _playtime = StateObject(wrappedValue: PlaytimeTracker(gameFolder: game.folderName))
     }
 
     var body: some View {
@@ -77,6 +80,18 @@ struct GamePlayerView: View {
         .onDisappear(perform: teardown)
         .onChange(of: controls.config.orientation) { newValue in
             OrientationManager.shared.apply(newValue)
+        }
+        .onChange(of: scenePhase) { phase in
+            switch phase {
+            case .active:
+                playtime.start()
+            case .inactive, .background:
+                playtime.pause()
+                store.refreshMetadata()
+            @unknown default:
+                playtime.pause()
+                store.refreshMetadata()
+            }
         }
     }
 
@@ -418,15 +433,20 @@ struct GamePlayerView: View {
         AudioSessionConfigurator.activate()
         OrientationManager.shared.apply(controls.config.orientation)
         store.markPlayed(game)
+        playtime.start()
         Self.haptic.prepare()
     }
 
     private func teardown() {
+        playtime.pause()
+        store.refreshMetadata()
         session.stop()
         OrientationManager.shared.restoreAuto()
     }
 
     private func close() {
+        playtime.pause()
+        store.refreshMetadata()
         session.stop()
         OrientationManager.shared.restoreAuto()
         dismiss()

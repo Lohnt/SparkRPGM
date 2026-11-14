@@ -10,6 +10,9 @@ struct Game: Identifiable, Equatable {
     var entryPath: String
     var byteSize: Int64
     var lastPlayed: Date?
+    var playSeconds: Double
+    /// Per-game override for the launcher's left accent line.
+    var lineColorHex: String?
     var hasCustomCover: Bool
     var coverURL: URL?
     var importedAt: Date?
@@ -38,6 +41,23 @@ struct Game: Identifiable, Equatable {
         return ByteCountFormatter.string(fromByteCount: byteSize, countStyle: .file)
     }
 
+    /// `3h 20m`, `42m`, or `Unplayed` when the counter is still empty.
+    var formattedPlaytime: String {
+        let totalMinutes = Int(playSeconds / 60)
+        guard totalMinutes > 0 else { return "Unplayed" }
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        return "\(minutes)m"
+    }
+
+    /// `4.2 GB • 3h 20m`
+    var statsLine: String {
+        "\(formattedSize)  •  \(formattedPlaytime)"
+    }
+
     var formattedLastPlayed: String? {
         guard let lastPlayed = lastPlayed else { return nil }
         let formatter = RelativeDateTimeFormatter()
@@ -51,6 +71,8 @@ struct Game: Identifiable, Equatable {
             && lhs.engine == rhs.engine
             && lhs.byteSize == rhs.byteSize
             && lhs.lastPlayed == rhs.lastPlayed
+            && lhs.playSeconds == rhs.playSeconds
+            && lhs.lineColorHex == rhs.lineColorHex
             && lhs.hasCustomCover == rhs.hasCustomCover
             && lhs.coverURL == rhs.coverURL
     }
@@ -63,12 +85,14 @@ struct GameMetadata: Codable {
     var engine: String?
     var entryPath: String?
     var byteSize: Int64?
-    var lastPlayed: Date?
-    var playSeconds: Double?
+    var lastPlayedAt: Date?
+    var playTimeSeconds: TimeInterval?
     var importedAt: Date?
     /// `true` once the user renamed the game, so the library never replaces
     /// their title with the one detected inside the game data.
     var customTitle: Bool?
+    /// Per-game left accent line (hex, e.g. `#FF5C8A`). `nil` = launcher default.
+    var accentColorHex: String?
 
     var resolvedEngine: GameEngine? {
         guard let engine = engine else { return nil }
@@ -76,6 +100,24 @@ struct GameMetadata: Codable {
     }
 
     init() {}
+}
+
+extension GameMetadata {
+
+    enum CodingKeys: String, CodingKey {
+        case displayName
+        case engine
+        case entryPath
+        case byteSize
+        case lastPlayedAt
+        case playTimeSeconds
+        case importedAt
+        case customTitle
+        case accentColorHex
+        // Legacy spellings written by earlier builds.
+        case lastPlayed
+        case playSeconds
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -83,10 +125,31 @@ struct GameMetadata: Codable {
         engine = try container.decodeIfPresent(String.self, forKey: .engine)
         entryPath = try container.decodeIfPresent(String.self, forKey: .entryPath)
         byteSize = try container.decodeIfPresent(Int64.self, forKey: .byteSize)
-        lastPlayed = try container.decodeIfPresent(Date.self, forKey: .lastPlayed)
-        playSeconds = try container.decodeIfPresent(Double.self, forKey: .playSeconds)
+
+        let currentLastPlayed = try container.decodeIfPresent(Date.self, forKey: .lastPlayedAt)
+        let legacyLastPlayed = try container.decodeIfPresent(Date.self, forKey: .lastPlayed)
+        lastPlayedAt = currentLastPlayed ?? legacyLastPlayed
+
+        let currentPlayTime = try container.decodeIfPresent(TimeInterval.self, forKey: .playTimeSeconds)
+        let legacyPlayTime = try container.decodeIfPresent(TimeInterval.self, forKey: .playSeconds)
+        playTimeSeconds = currentPlayTime ?? legacyPlayTime
+
         importedAt = try container.decodeIfPresent(Date.self, forKey: .importedAt)
         customTitle = try container.decodeIfPresent(Bool.self, forKey: .customTitle)
+        accentColorHex = try container.decodeIfPresent(String.self, forKey: .accentColorHex)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(displayName, forKey: .displayName)
+        try container.encodeIfPresent(engine, forKey: .engine)
+        try container.encodeIfPresent(entryPath, forKey: .entryPath)
+        try container.encodeIfPresent(byteSize, forKey: .byteSize)
+        try container.encodeIfPresent(lastPlayedAt, forKey: .lastPlayedAt)
+        try container.encodeIfPresent(playTimeSeconds, forKey: .playTimeSeconds)
+        try container.encodeIfPresent(importedAt, forKey: .importedAt)
+        try container.encodeIfPresent(customTitle, forKey: .customTitle)
+        try container.encodeIfPresent(accentColorHex, forKey: .accentColorHex)
     }
 }
 

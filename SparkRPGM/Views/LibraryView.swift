@@ -7,6 +7,7 @@ private enum LibraryRoute: Identifiable {
     case coverPhoto(Game)
     case coverFile(Game)
     case rename(Game)
+    case lineColor(Game)
     case customizeLauncher
     case importProgress
 
@@ -16,6 +17,7 @@ private enum LibraryRoute: Identifiable {
         case .coverPhoto(let game): return "cover-photo-\(game.folderName)"
         case .coverFile(let game): return "cover-file-\(game.folderName)"
         case .rename(let game): return "rename-\(game.folderName)"
+        case .lineColor(let game): return "line-color-\(game.folderName)"
         case .customizeLauncher: return "customize-launcher"
         case .importProgress: return "import-progress"
         }
@@ -76,6 +78,17 @@ struct LibraryView: View {
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     HStack(spacing: 16) {
+                        Button {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                launcher.settings.viewStyle = launcher.settings.viewStyle.toggled
+                            }
+                        } label: {
+                            Image(systemName: launcher.settings.viewStyle.toggled.symbolName)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.85))
+                        }
+                        .accessibilityLabel("Switch to \(launcher.settings.viewStyle.toggled.title)")
+
                         Button {
                             route = .customizeLauncher
                         } label: {
@@ -247,45 +260,82 @@ struct LibraryView: View {
         } else if filteredGames.isEmpty {
             noResultsState
         } else {
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: launcher.settings.cardSize.minimumWidth), spacing: 16)],
-                spacing: 18
-            ) {
-                ForEach(filteredGames) { game in
-                    GameCardView(
-                        game: game,
-                        cardSize: launcher.settings.cardSize,
-                        glassOpacity: launcher.settings.glassOpacity,
-                        accent: accent,
-                        onOpen: {
-                            store.markPlayed(game)
-                            selectedGame = game
-                        },
-                        onRename: {
-                            route = .rename(game)
-                        },
-                        onSetCover: {
-                            coverTarget = game
-                            showCoverSourceDialog = true
-                        },
-                        onRemoveCover: {
-                            store.removeCustomCover(for: game)
-                        },
-                        onBackup: {
-                            do {
-                                _ = try store.backupSaves(for: game)
-                            } catch {
-                                store.errorMessage = error.localizedDescription
-                            }
-                        },
-                        onDelete: {
-                            deleteTarget = game
-                            showDeleteDialog = true
-                        }
-                    )
-                }
+            switch launcher.settings.viewStyle {
+            case .sparkLines:
+                sparkLines
+            case .prismIcons:
+                prismGrid
             }
-            .padding(.horizontal, 20)
+        }
+    }
+
+    private var prismGrid: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: launcher.settings.cardSize.minimumWidth), spacing: 16)],
+            spacing: 18
+        ) {
+            ForEach(filteredGames) { game in
+                GameCardView(
+                    game: game,
+                    cardSize: launcher.settings.cardSize,
+                    glassOpacity: launcher.settings.glassOpacity,
+                    accent: accent,
+                    lineColor: launcher.settings.lineColor(for: game),
+                    onOpen: { openGame(game) },
+                    onRename: { route = .rename(game) },
+                    onSetCover: {
+                        coverTarget = game
+                        showCoverSourceDialog = true
+                    },
+                    onRemoveCover: { store.removeCustomCover(for: game) },
+                    onChangeLineColor: { route = .lineColor(game) },
+                    onBackup: { backup(game) },
+                    onDelete: {
+                        deleteTarget = game
+                        showDeleteDialog = true
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private var sparkLines: some View {
+        LazyVStack(spacing: 9) {
+            ForEach(filteredGames) { game in
+                SparkLineRowView(
+                    game: game,
+                    lineColor: launcher.settings.lineColor(for: game),
+                    glassOpacity: launcher.settings.glassOpacity,
+                    onOpen: { openGame(game) },
+                    onRename: { route = .rename(game) },
+                    onSetCover: {
+                        coverTarget = game
+                        showCoverSourceDialog = true
+                    },
+                    onRemoveCover: { store.removeCustomCover(for: game) },
+                    onChangeLineColor: { route = .lineColor(game) },
+                    onBackup: { backup(game) },
+                    onDelete: {
+                        deleteTarget = game
+                        showDeleteDialog = true
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 20)
+    }
+
+    private func openGame(_ game: Game) {
+        store.markPlayed(game)
+        selectedGame = game
+    }
+
+    private func backup(_ game: Game) {
+        do {
+            _ = try store.backupSaves(for: game)
+        } catch {
+            store.errorMessage = error.localizedDescription
         }
     }
 
@@ -354,9 +404,12 @@ struct LibraryView: View {
 
     private var footerHint: some View {
         VStack(spacing: 5) {
-            Text("Pull down to rescan  •  Long-press a card for more")
+            Text("Pull down to rescan  •  Long-press a game for more")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.white.opacity(0.35))
+            Text("Tap the \(launcher.settings.viewStyle.toggled.title) icon to switch layout")
+                .font(.system(size: 10, weight: .regular))
+                .foregroundColor(.white.opacity(0.25))
             Text("Files.app: On My iPad / SparkRPGM")
                 .font(.system(size: 10, weight: .regular, design: .monospaced))
                 .foregroundColor(.white.opacity(0.25))
@@ -441,6 +494,13 @@ struct LibraryView: View {
             result.sort { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case .recent:
             result.sort { ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast) }
+        case .mostPlayed:
+            result.sort {
+                if $0.playSeconds == $1.playSeconds {
+                    return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+                }
+                return $0.playSeconds > $1.playSeconds
+            }
         case .size:
             result.sort { $0.byteSize > $1.byteSize }
         }
@@ -495,6 +555,9 @@ struct LibraryView: View {
                     store.errorMessage = error.localizedDescription
                 }
             }
+
+        case .lineColor(let game):
+            LineColorPickerView(game: game)
 
         case .customizeLauncher:
             LauncherCustomizationView()

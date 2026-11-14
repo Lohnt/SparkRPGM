@@ -1,0 +1,179 @@
+name: Build TrollStore IPA
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: sparkrpgm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT: SparkRPGM.xcodeproj
+  SCHEME: SparkRPGM
+  TARGET: SparkRPGM
+
+jobs:
+  build:
+    name: Unsigned IPA (iOS 15.0+)
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          lfs: false
+
+      - name: Show toolchain
+        run: |
+          set -x
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          uname -m
+
+      - name: Install build tooling
+        run: |
+          brew install xcodegen git-lfs
+          git lfs install
+          xcodegen --version
+
+      - name: Cache Swift Package Manager
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/Library/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+
+      - name: Generate app icons (Pillow)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/iconvenv"
+          . "$RUNNER_TEMP/iconvenv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install pillow
+          python scripts/generate_icons.py --repo-root "$GITHUB_WORKSPACE"
+
+      - name: Fetch ogv.js 1.8.9 runtime
+        run: |
+          set -euo pipefail
+          WORK="$RUNNER_TEMP/ogv-npm"
+          rm -rf "$WORK"
+          mkdir -p "$WORK"
+          cd "$WORK"
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund --loglevel=error ogv@1.8.9
+          DEST="$GITHUB_WORKSPACE/SparkRPGM/Resources/WebRuntime/ogv"
+          mkdir -p "$DEST"
+          rm -f "$DEST/.keep"
+          cp -R node_modules/ogv/dist/. "$DEST"/
+          echo "--- ogv runtime ---"
+          ls -la "$DEST"
+          test -f "$DEST/ogv.js"
+
+      - name: Fetch EasyRPG Web runtime
+        run: |
+          set -uo pipefail
+          DEST="$GITHUB_WORKSPACE/SparkRPGM/Resources/WebRuntime/easyrpg"
+          mkdir -p "$DEST"
+          ok=0
+          for attempt in 1 2 3; do
+            rm -rf "$RUNNER_TEMP/easyrpg-web"
+            if git clone --depth 1 https://github.com/torahappy/easyrpg-web.git "$RUNNER_TEMP/easyrpg-web"; then
+              cd "$RUNNER_TEMP/easyrpg-web"
+              git lfs install --local || true
+              git lfs pull || true
+              if [ -f www/index.js ] && [ -f www/easyrpg-player.wasm ]; then
+                cp www/index.js www/easyrpg-player.wasm "$DEST"/
+                for extra in www/index.* www/easyrpg-player.*; do
+                  [ -f "$extra" ] && cp "$extra" "$DEST"/ 2>/dev/null || true
+                done
+                ok=1
+                break
+              fi
+            fi
+            echo "EasyRPG fetch attempt $attempt failed, retrying..."
+            sleep 5
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::warning title=EasyRPG runtime unavailable::The easyrpg-web clone or LFS pull failed. The app still builds; RPG Maker 2000/2003 titles will show a runtime warning until Resources/WebRuntime/easyrpg is populated."
+            echo "unavailable" > "$DEST/UNAVAILABLE.txt"
+          fi
+          ls -la "$DEST"
+
+      - name: Generate Xcode project
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec project.yml
+          ls -la
+
+      - name: Build unsigned app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/$TARGET.app"
+          if [ ! -d "$APP" ]; then
+            echo "App bundle not found at $APP"
+            exit 1
+          fi
+          rm -rf "$RUNNER_TEMP/Payload" "$GITHUB_WORKSPACE/$TARGET.ipa"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP"
+          zip -qry "$GITHUB_WORKSPACE/$TARGET.ipa" Payload
+          cd "$GITHUB_WORKSPACE"
+          ls -lh "$TARGET.ipa"
+          unzip -l "$TARGET.ipa" | head -40
+
+      - name: Write build summary
+        if: always()
+        run: |
+          {
+            echo "### SparkRPGM build"
+            echo ""
+            echo "- Deployment target: iOS 15.0"
+            echo "- Configuration: Release (unsigned)"
+            echo "- Artifact: \`SparkRPGM.ipa\` (TrollStore / TrollStore Lite)"
+            if [ -f "$GITHUB_WORKSPACE/SparkRPGM.ipa" ]; then
+              echo "- Size: $(du -h "$GITHUB_WORKSPACE/SparkRPGM.ipa" | cut -f1)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SparkRPGM-ipa
+          path: SparkRPGM.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ${{ runner.temp }}/xcodebuild.log
+          if-no-files-found: ignore
+          retention-days: 7

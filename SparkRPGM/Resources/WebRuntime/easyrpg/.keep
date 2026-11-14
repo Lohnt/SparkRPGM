@@ -1,0 +1,4 @@
+This folder is populated at build time by the GitHub Actions workflow
+(`git clone https://github.com/torahappy/easyrpg-web` with Git LFS). The
+placeholder keeps the folder reference in the Xcode project before the first CI
+run. SparkRPGM generates `host.html` and the two manifests itself.

@@ -1,0 +1,44 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+SparkRPGM.ipa
+
+# XcodeGen output (regenerate with `xcodegen generate`)
+SparkRPGM.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Runtimes fetched by the GitHub Actions workflow
+SparkRPGM/Resources/WebRuntime/ogv/*
+!SparkRPGM/Resources/WebRuntime/ogv/.keep
+SparkRPGM/Resources/WebRuntime/easyrpg/*
+!SparkRPGM/Resources/WebRuntime/easyrpg/.keep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs / scratch
+*.log
+tmp/

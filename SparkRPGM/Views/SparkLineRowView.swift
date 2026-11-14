@@ -1,13 +1,14 @@
 import SwiftUI
 
-/// One row of the `Spark Lines` library style: a 4pt coloured accent bar,
-/// title, engine badge, disk size and play time. No cover art is loaded, which
-/// keeps scrolling cheap on older iPads.
+/// One row of the `Spark Lines` library style.
+///
+/// Flat neutral surface, a 4pt accent bar and a single muted metadata line:
+/// `MZ · 4.2 GB · 3h 20m · Played today`. No cover art is loaded, which keeps
+/// scrolling cheap on older iPads.
 struct SparkLineRowView: View {
 
     let game: Game
     let lineColor: Color
-    let glassOpacity: Double
 
     var onOpen: () -> Void
     var onRename: () -> Void
@@ -17,66 +18,51 @@ struct SparkLineRowView: View {
     var onBackup: () -> Void
     var onDelete: () -> Void
 
-    var body: some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [lineColor, lineColor.opacity(0.55)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: 4)
-                .padding(.vertical, 11)
-                .shadow(color: lineColor.opacity(0.55), radius: 4, x: 0, y: 0)
+    private var metadataLine: String {
+        var parts = [game.engine.rawValue, game.statsLine]
+        if let hint = game.lastPlayedHint {
+            parts.append(hint)
+        }
+        return parts.joined(separator: " • ")
+    }
 
-            VStack(alignment: .leading, spacing: 4) {
+    var body: some View {
+        HStack(spacing: 13) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(lineColor)
+                .frame(width: 4)
+                .padding(.vertical, 13)
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(game.title)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(SparkTheme.textPrimary)
                     .lineLimit(1)
 
-                HStack(spacing: 7) {
-                    EngineBadge(engine: game.engine, compact: true)
-
-                    Text(game.statsLine)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.white.opacity(0.55))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-
-                    Spacer(minLength: 0)
-                }
-
-                if let hint = game.lastPlayedHint {
-                    Text(hint)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.white.opacity(0.38))
-                        .lineLimit(1)
-                }
+                Text(metadataLine)
+                    .font(.system(size: 11, weight: .regular))
+                    .foregroundColor(SparkTheme.textSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
 
-            Spacer(minLength: 4)
+            Spacer(minLength: 6)
 
-            Image(systemName: "play.circle.fill")
-                .font(.system(size: 20, weight: .regular))
-                .foregroundColor(lineColor.opacity(0.9))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(SparkTheme.textTertiary)
         }
-        .padding(.trailing, 14)
-        .frame(minHeight: 68)
+        .padding(.trailing, 15)
+        .frame(minHeight: 64)
         .background(
-            ZStack {
-                BlurView(style: .systemUltraThinMaterialDark)
-                Color.black.opacity(max(0.10, glassOpacity * 0.55))
-            }
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(SparkTheme.panel)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture(perform: onOpen)
         .contextMenu {
             Button(action: onOpen) {

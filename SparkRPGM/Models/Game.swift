@@ -55,7 +55,7 @@ struct Game: Identifiable, Equatable {
 
     /// `4.2 GB • 3h 20m`
     var statsLine: String {
-        "\(formattedSize)  •  \(formattedPlaytime)"
+        "\(formattedSize) • \(formattedPlaytime)"
     }
 
     /// Human hint for the library items: `Played today`, `Played yesterday`,

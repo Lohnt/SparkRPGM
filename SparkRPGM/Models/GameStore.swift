@@ -12,6 +12,7 @@ final class GameStore: ObservableObject {
     let metadata: MetadataStore
     private let fileManager = FileManager.default
     private var hasScanned = false
+    private var rescanRequested = false
     private var toastWorkItem: DispatchWorkItem?
 
     init(metadata: MetadataStore = .shared) {
@@ -21,7 +22,12 @@ final class GameStore: ObservableObject {
     // MARK: - Scanning
 
     func scan() {
-        guard !isScanning else { return }
+        guard !isScanning else {
+            // An import can finish while the initial scan is still running.
+            // Remember to run one more pass instead of dropping the refresh.
+            rescanRequested = true
+            return
+        }
         isScanning = true
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -33,6 +39,10 @@ final class GameStore: ObservableObject {
                 self.hasScanned = true
                 if !scanned.isEmpty {
                     self.refreshMissingSizes()
+                }
+                if self.rescanRequested {
+                    self.rescanRequested = false
+                    self.scan()
                 }
             }
         }

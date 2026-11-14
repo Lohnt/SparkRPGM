@@ -22,7 +22,7 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
     private let runtimeResolver: CaseInsensitiveFileResolver?
     private let fileManager = FileManager.default
     private let queue = DispatchQueue(
-        label: "com.sparkrpgm.scheme",
+        label: "com.faith.sparkrpgm.scheme",
         qos: .userInitiated,
         attributes: .concurrent
     )

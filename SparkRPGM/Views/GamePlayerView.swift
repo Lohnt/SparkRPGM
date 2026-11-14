@@ -9,6 +9,7 @@ struct GamePlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var store: GameStore
+    @EnvironmentObject private var launcher: LauncherSettingsStore
 
     @StateObject private var session: GameSession
     @StateObject private var controls: ControlSettingsStore
@@ -22,6 +23,8 @@ struct GamePlayerView: View {
     @State private var speedMultiplier = 1
 
     private static let haptic = UIImpactFeedbackGenerator(style: .light)
+
+    private var accent: Color { launcher.settings.accentColor }
 
     init(game: Game) {
         self.game = game
@@ -110,64 +113,66 @@ struct GamePlayerView: View {
 
     private var loadingOverlay: some View {
         ZStack {
-            Color.black.opacity(0.92).ignoresSafeArea()
-            VStack(spacing: 16) {
-                ZStack {
-                    Circle()
-                        .fill(Color.white.opacity(0.06))
-                        .frame(width: 86, height: 86)
-                    Image(systemName: game.engine.isEasyRPG ? "gamecontroller.fill" : "sparkles")
-                        .font(.system(size: 30, weight: .light))
-                        .foregroundColor(.white.opacity(0.8))
-                }
-                Text(game.title)
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 30)
-                Text(game.engine.isEasyRPG ? "Starting EasyRPG Player…" : "Starting \(game.engine.displayName)…")
-                    .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.5))
+            SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
+
+            VStack(spacing: 14) {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    .scaleEffect(1.05)
+
+                Text(game.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(SparkTheme.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+
+                Text(game.engine.isEasyRPG ? "Starting EasyRPG Player" : "Starting \(game.engine.displayName)")
+                    .font(.system(size: 11))
+                    .foregroundColor(SparkTheme.textSecondary)
             }
         }
     }
 
     private func errorOverlay(message: String) -> some View {
         ZStack {
-            Color.black.opacity(0.9).ignoresSafeArea()
-            VStack(spacing: 14) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(Color(red: 1, green: 0.72, blue: 0.35))
+            SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
+
+            VStack(spacing: 13) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundColor(SparkTheme.textSecondary)
+
                 Text("The game could not start")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(SparkTheme.textPrimary)
+
                 Text(message)
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.55))
+                    .foregroundColor(SparkTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 26)
-                HStack(spacing: 12) {
+                    .padding(.horizontal, 30)
+
+                HStack(spacing: 10) {
                     Button("Retry") {
                         session.loadGame()
                     }
+                    .font(.system(size: 13, weight: .medium))
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(Color.white.opacity(0.12))
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
+                    .padding(.vertical, 9)
+                    .background(Color.white.opacity(0.08))
+                    .foregroundColor(SparkTheme.textPrimary)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                     Button("Close") {
                         close()
                     }
+                    .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(Color(red: 0.49, green: 0.36, blue: 1.0))
+                    .padding(.vertical, 9)
+                    .background(accent)
                     .foregroundColor(.white)
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
         }
@@ -177,67 +182,44 @@ struct GamePlayerView: View {
 
     private var topBar: some View {
         VStack {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Button(action: close) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(width: 32, height: 32)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(Circle())
+                    barIcon("chevron.left")
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(game.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(SparkTheme.textPrimary)
                         .lineLimit(1)
                     Text(game.engine.displayName)
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(.white.opacity(0.45))
+                        .font(.system(size: 9, weight: .regular))
+                        .foregroundColor(SparkTheme.textSecondary)
                 }
 
-                Spacer(minLength: 4)
+                Spacer(minLength: 6)
 
                 if !game.engine.isMKXP {
                     Button(action: cycleSpeed) {
-                        Text("\(speedMultiplier)x")
-                            .font(.system(size: 12, weight: .heavy, design: .rounded))
-                            .frame(width: 32, height: 32)
+                        Text("\(speedMultiplier)×")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 30, height: 30)
                             .background(
-                                speedMultiplier > 1
-                                    ? Color(red: 0.49, green: 0.36, blue: 1.0)
-                                    : Color.white.opacity(0.10)
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(speedMultiplier > 1 ? accent : Color.white.opacity(0.08))
                             )
-                            .clipShape(Circle())
-                            .overlay(
-                                Circle().stroke(
-                                    Color.white.opacity(speedMultiplier > 1 ? 0.45 : 0),
-                                    lineWidth: 1
-                                )
-                            )
+                            .foregroundColor(SparkTheme.textPrimary)
                     }
                     .accessibilityLabel("Game speed")
                     .accessibilityValue("\(speedMultiplier) times")
                 }
 
-                Button {
-                    cycleOrientation()
-                } label: {
-                    Image(systemName: controls.config.orientation.symbolName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(Circle())
+                Button(action: cycleOrientation) {
+                    barIcon(controls.config.orientation.symbolName)
                 }
 
-                Button {
-                    session.reload()
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(Circle())
+                Button(action: { session.reload() }) {
+                    barIcon("arrow.clockwise")
                 }
 
                 Button {
@@ -245,11 +227,7 @@ struct GamePlayerView: View {
                         isEditing.toggle()
                     }
                 } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(isEditing ? Color(red: 0.49, green: 0.36, blue: 1.0) : Color.white.opacity(0.10))
-                        .clipShape(Circle())
+                    barIcon("slider.horizontal.3", active: isEditing)
                 }
 
                 Button {
@@ -258,22 +236,38 @@ struct GamePlayerView: View {
                         showControls = false
                     }
                 } label: {
-                    Image(systemName: "eye.slash")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background(Color.white.opacity(0.10))
-                        .clipShape(Circle())
+                    barIcon("eye.slash")
                 }
             }
-            .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .glassCard(cornerRadius: 20, opacity: 0.55)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 6)
+            .background(
+                ZStack {
+                    BlurView(style: .systemThinMaterialDark)
+                    Color.black.opacity(0.30)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(Color.white.opacity(0.10), lineWidth: SparkTheme.hairlineWidth)
+            )
             .padding(.horizontal, 14)
             .padding(.top, 8)
 
             Spacer()
         }
+    }
+
+    private func barIcon(_ name: String, active: Bool = false) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 12, weight: .semibold))
+            .frame(width: 30, height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(active ? accent : Color.white.opacity(0.08))
+            )
+            .foregroundColor(SparkTheme.textPrimary)
     }
 
     private var restoreBarButton: some View {
@@ -287,15 +281,19 @@ struct GamePlayerView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
                         Text("Show")
+                            .font(.system(size: 11, weight: .medium))
                     }
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.8))
-                    .padding(.horizontal, 10)
+                    .foregroundColor(SparkTheme.textSecondary)
+                    .padding(.horizontal, 11)
                     .padding(.vertical, 6)
-                    .background(Color.black.opacity(0.35))
-                    .clipShape(Capsule())
-                    .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+                    .background(Color.black.opacity(0.40))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color.white.opacity(0.12), lineWidth: SparkTheme.hairlineWidth)
+                    )
                 }
                 .padding(.leading, 14)
                 .padding(.top, 10)
@@ -314,9 +312,9 @@ struct GamePlayerView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text("Customize Controls")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
+                            Text("Controls")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(SparkTheme.textPrimary)
                             Spacer()
                             Button {
                                 withAnimation(.easeOut(duration: 0.2)) {
@@ -324,14 +322,15 @@ struct GamePlayerView: View {
                                     controls.save(scope: scope)
                                 }
                             } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundColor(.white.opacity(0.5))
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(SparkTheme.textSecondary)
                             }
                         }
 
                         Text("Drag the D-Pad or the buttons to reposition them.")
                             .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.45))
+                            .foregroundColor(SparkTheme.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
 
                         Picker("Save to", selection: $scope) {
@@ -369,9 +368,7 @@ struct GamePlayerView: View {
                         toggleRow("Show Ctrl / Skip button", isOn: $controls.config.showCtrl)
 
                         Text("ORIENTATION")
-                            .font(.system(size: 9, weight: .bold))
-                            .tracking(1.2)
-                            .foregroundColor(.white.opacity(0.35))
+                            .sparkSectionLabel()
 
                         Picker("Orientation", selection: $controls.config.orientation) {
                             ForEach(OrientationMode.allCases) { mode in
@@ -380,16 +377,16 @@ struct GamePlayerView: View {
                         }
                         .pickerStyle(SegmentedPickerStyle())
 
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             Button("Reset") {
                                 controls.reset()
                             }
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(.system(size: 12, weight: .medium))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color.white.opacity(0.08))
-                            .foregroundColor(.white.opacity(0.75))
-                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .padding(.vertical, 9)
+                            .background(Color.white.opacity(0.06))
+                            .foregroundColor(SparkTheme.textSecondary)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
                             Button("Save") {
                                 controls.save(scope: scope)
@@ -400,10 +397,10 @@ struct GamePlayerView: View {
                             }
                             .font(.system(size: 12, weight: .semibold))
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .background(Color(red: 0.49, green: 0.36, blue: 1.0))
+                            .padding(.vertical, 9)
+                            .background(accent)
                             .foregroundColor(.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .padding(.top, 2)
                     }
@@ -411,7 +408,7 @@ struct GamePlayerView: View {
                 }
                 .frame(maxHeight: 520)
                 .frame(width: 300)
-                .glassCard(cornerRadius: 20, opacity: 0.72)
+                .sparkPanel(cornerRadius: 14, fill: SparkTheme.panel, borderOpacity: 0.12)
                 .padding(.trailing, 16)
                 .padding(.top, 66)
             }
@@ -428,25 +425,25 @@ struct GamePlayerView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.55))
+                    .font(.system(size: 11))
+                    .foregroundColor(SparkTheme.textSecondary)
                 Spacer()
                 Text(display)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(SparkTheme.textTertiary)
             }
             Slider(value: value, in: range)
-                .accentColor(Color(red: 0.49, green: 0.36, blue: 1.0))
+                .accentColor(accent)
         }
     }
 
     private func toggleRow(_ title: String, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white.opacity(0.7))
+                .font(.system(size: 11))
+                .foregroundColor(SparkTheme.textSecondary)
         }
-        .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.49, green: 0.36, blue: 1.0)))
+        .toggleStyle(SwitchToggleStyle(tint: accent))
     }
 
     // MARK: - Lifecycle and input

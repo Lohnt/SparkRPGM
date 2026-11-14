@@ -13,16 +13,22 @@ struct ImportJob: Identifiable, Equatable {
 }
 
 /// Serialises archive imports and publishes their progress to the UI.
+///
+/// Each queued `PickedDocument` keeps its security scope alive until the job
+/// finishes, so the archive can be streamed straight off the provider's storage
+/// instead of being copied into `tmp` first.
 final class ImportCoordinator: ObservableObject {
 
     @Published private(set) var jobs: [ImportJob] = []
-    @Published var isPresentingPicker = false
-    @Published var isShowingProgress = false
-    @Published var errorBanner: String?
+    @Published private(set) var isShowingProgress = false
+
+    /// Bound to the library's `.alert`. Errors are never silent.
+    @Published var failureMessage: String?
 
     private let store: GameStore
     private let importer: ArchiveImporter
-    private var queue: [URL] = []
+
+    private var queue: [PickedDocument] = []
     private var isProcessing = false
     private var cancellationTokens: [UUID: ImportCancellationToken] = [:]
     private var activeURLs = Set<String>()
@@ -35,16 +41,22 @@ final class ImportCoordinator: ObservableObject {
     // MARK: - Public API
 
     func enqueue(urls: [URL]) {
-        guard !urls.isEmpty else { return }
+        enqueue(documents: urls.map(PickedDocument.init(url:)))
+    }
+
+    func enqueue(documents: [PickedDocument]) {
+        guard !documents.isEmpty else { return }
+
         var added = false
-        for url in urls {
-            let path = url.standardizedFileURL.path
+        for document in documents {
+            let path = document.url.standardizedFileURL.path
             guard !activeURLs.contains(path) else { continue }
             activeURLs.insert(path)
-            queue.append(url)
+            queue.append(document)
             added = true
         }
         guard added else { return }
+
         isShowingProgress = true
         processNext()
     }
@@ -63,19 +75,28 @@ final class ImportCoordinator: ObservableObject {
         }
     }
 
+    func clearFailure() {
+        failureMessage = nil
+    }
+
     func dismissFinishedJobs() {
-        let removed = jobs.filter { $0.isFinished || $0.isFailed }
-        for job in removed {
+        let finished = jobs.filter { $0.isFinished || $0.isFailed }
+        for job in finished {
             cancellationTokens.removeValue(forKey: job.id)
         }
         jobs.removeAll { $0.isFinished || $0.isFailed }
-        if jobs.isEmpty {
+        if jobs.isEmpty, queue.isEmpty, !isProcessing {
             isShowingProgress = false
         }
     }
 
-    func clearError() {
-        errorBanner = nil
+    /// The job the banner should describe right now.
+    var activeJob: ImportJob? {
+        jobs.first(where: { !$0.isFinished }) ?? jobs.last
+    }
+
+    var activeCount: Int {
+        jobs.filter { !$0.isFinished }.count
     }
 
     // MARK: - Processing
@@ -84,17 +105,13 @@ final class ImportCoordinator: ObservableObject {
         guard !isProcessing else { return }
         guard !queue.isEmpty else {
             isProcessing = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-                guard let self = self else { return }
-                if self.jobs.allSatisfy({ $0.isFinished || $0.isFailed }) {
-                    self.isShowingProgress = self.jobs.contains(where: { $0.isFailed })
-                }
-            }
+            finishIfIdle()
             return
         }
 
         isProcessing = true
-        let url = queue.removeFirst()
+        let document = queue.removeFirst()
+        let url = document.url
         let jobID = UUID()
         let token = ImportCancellationToken()
         cancellationTokens[jobID] = token
@@ -108,31 +125,26 @@ final class ImportCoordinator: ObservableObject {
         jobs.append(job)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Hold the security scope for the entire extraction.
-            let scope = SecurityScopedResource(url)
-            defer { _ = scope }
+            guard let self = self else { return }
 
+            // `document` is captured for the duration of the extraction, so the
+            // security scope claimed by the picker never drops mid-job.
             let result: Result<ImportResult, Error>
             do {
-                let imported = try self?.importer.importItem(at: url, token: token) { fraction, status in
+                let imported = try self.importer.importItem(at: document.url, token: token) { fraction, status in
                     DispatchQueue.main.async {
-                        self?.update(jobID: jobID) { job in
+                        self.update(jobID: jobID) { job in
                             job.fraction = fraction
                             job.statusText = status
                         }
                     }
                 }
-                if let imported = imported {
-                    result = .success(imported)
-                } else {
-                    result = .failure(ArchiveError.cancelled)
-                }
+                result = .success(imported)
             } catch {
                 result = .failure(error)
             }
 
             DispatchQueue.main.async {
-                guard let self = self else { return }
                 self.activeURLs.remove(url.standardizedFileURL.path)
                 self.cancellationTokens.removeValue(forKey: jobID)
 
@@ -144,6 +156,8 @@ final class ImportCoordinator: ObservableObject {
                         job.isFinished = true
                     }
                     self.store.toast("Imported \(imported.title)")
+                    // Refresh immediately. GameStore coalesces a scan that was
+                    // already running into a follow-up pass.
                     self.store.scan()
 
                 case .failure(let error):
@@ -154,7 +168,7 @@ final class ImportCoordinator: ObservableObject {
                         job.errorText = message
                         job.isFinished = true
                     }
-                    self.errorBanner = message
+                    self.failureMessage = message
                 }
 
                 self.isProcessing = false
@@ -170,15 +184,16 @@ final class ImportCoordinator: ObservableObject {
         jobs[index] = job
     }
 
-    // MARK: - Presentation helpers
+    /// Leaves the banner visible for a moment after the last job, then clears
+    /// the finished rows so the next import starts on a clean slate.
+    private func finishIfIdle() {
+        guard jobs.allSatisfy({ $0.isFinished || $0.isFailed }) else { return }
 
-    func presentPicker() {
-        isPresentingPicker = true
-    }
-
-    var overallProgress: Double {
-        guard !jobs.isEmpty else { return 0 }
-        let finished = jobs.filter { $0.isFinished && !$0.isFailed }.count
-        return Double(finished) / Double(jobs.count)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in
+            guard let self = self else { return }
+            guard !self.isProcessing, self.queue.isEmpty else { return }
+            self.isShowingProgress = false
+            self.jobs.removeAll { $0.isFinished }
+        }
     }
 }

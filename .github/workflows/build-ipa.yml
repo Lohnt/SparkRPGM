@@ -58,7 +58,11 @@ jobs:
           . "$RUNNER_TEMP/iconvenv/bin/activate"
           python -m pip install --upgrade pip
           python -m pip install pillow
+          rm -rf SparkRPGM/Resources/IconAssets
           python scripts/generate_icons.py --repo-root "$GITHUB_WORKSPACE"
+          test -f SparkRPGM/Resources/IconAssets/AppIcon@2x.png
+          test -f SparkRPGM/Resources/IconAssets/IconMidnight-83.5@2x.png
+          ls -la SparkRPGM/Resources/IconAssets | head -20
 
       - name: Fetch ogv.js 1.8.9 runtime
         run: |

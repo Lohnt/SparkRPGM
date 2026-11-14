@@ -29,7 +29,6 @@
 		<integer>1</integer>
 		<integer>2</integer>
 	</array>
-
 	<!-- Spark-style Files.app integration: On My iPad / SparkRPGM -->
 	<key>UIFileSharingEnabled</key>
 	<true/>
@@ -68,19 +67,16 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.games</string>
-
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Select a screenshot to use as a game cover, or a photo to use as your launcher wallpaper. SparkRPGM never uploads your photos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save generated images to your photo library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>SparkRPGM only uses local storage. This entry exists for web-based game engines that probe for local network helpers.</string>
-
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsInWebContent</key>
@@ -88,7 +84,6 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-
 	<!-- Alternate app icons. The names match the .appiconset names compiled by
 	     ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS=YES. -->
 	<key>CFBundleIcons</key>
@@ -111,9 +106,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconMidnight</string>
+					<string>IconMidnight-76</string>
+					<string>IconMidnight-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconMidnight</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -122,9 +117,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconRetro</string>
+					<string>IconRetro-76</string>
+					<string>IconRetro-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconRetro</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -133,9 +128,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconCrimson</string>
+					<string>IconCrimson-76</string>
+					<string>IconCrimson-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconCrimson</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -144,9 +139,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconNeon</string>
+					<string>IconNeon-76</string>
+					<string>IconNeon-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconNeon</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -155,9 +150,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconMinimal</string>
+					<string>IconMinimal-76</string>
+					<string>IconMinimal-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconMinimal</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -183,9 +178,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconMidnight</string>
+					<string>IconMidnight-76</string>
+					<string>IconMidnight-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconMidnight</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -194,9 +189,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconRetro</string>
+					<string>IconRetro-76</string>
+					<string>IconRetro-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconRetro</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -205,9 +200,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconCrimson</string>
+					<string>IconCrimson-76</string>
+					<string>IconCrimson-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconCrimson</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -216,9 +211,9 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconNeon</string>
+					<string>IconNeon-76</string>
+					<string>IconNeon-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconNeon</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
@@ -227,15 +222,14 @@
 				<key>CFBundleIconFiles</key>
 				<array>
 					<string>IconMinimal</string>
+					<string>IconMinimal-76</string>
+					<string>IconMinimal-83.5</string>
 				</array>
-				<key>CFBundleIconName</key>
-				<string>IconMinimal</string>
 				<key>UIPrerenderedIcon</key>
 				<false/>
 			</dict>
 		</dict>
 	</dict>
-
 	<!-- "Open in SparkRPGM" for archives and APKs -->
 	<key>CFBundleDocumentTypes</key>
 	<array>
@@ -269,7 +263,6 @@
 			</array>
 		</dict>
 	</array>
-
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>

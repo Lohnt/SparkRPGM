@@ -1,27 +1,24 @@
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
 
 private enum LibraryRoute: Identifiable {
-    case archives
-    case coverPhoto(Game)
-    case coverFile(Game)
     case rename(Game)
     case lineColor(Game)
     case customizeLauncher
-    case importProgress
 
     var id: String {
         switch self {
-        case .archives: return "archives"
-        case .coverPhoto(let game): return "cover-photo-\(game.folderName)"
-        case .coverFile(let game): return "cover-file-\(game.folderName)"
         case .rename(let game): return "rename-\(game.folderName)"
         case .lineColor(let game): return "line-color-\(game.folderName)"
         case .customizeLauncher: return "customize-launcher"
-        case .importProgress: return "import-progress"
         }
     }
+}
+
+private struct LibraryAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 struct LibraryView: View {
@@ -41,69 +38,61 @@ struct LibraryView: View {
     @State private var deleteTarget: Game?
     @State private var showDeleteDialog = false
 
+    @State private var alert: LibraryAlert?
+
     private var accent: Color { launcher.settings.accentColor }
 
     var body: some View {
         NavigationView {
             ZStack {
-                LauncherBackground(settings: launcher.settings)
+                LauncherBackground(launcher: launcher, coverURL: ambientCoverURL)
 
                 RefreshableScrollView(onRefresh: { store.scan() }) {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 20) {
                         header
                         searchField
-                        filterChips
+                        filterRow
                         libraryContent
                         footerHint
                     }
-                    .padding(.bottom, 120)
+                    .padding(.bottom, 110)
                 }
 
-                toastOverlay
-                errorOverlay
+                importBanner
             }
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    HStack(spacing: 7) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(accent)
-                        Text(launcher.settings.headerTitle)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.85))
-                            .lineLimit(1)
-                    }
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
+                    HStack(spacing: 18) {
                         Button {
-                            withAnimation(.easeOut(duration: 0.2)) {
+                            withAnimation(.easeOut(duration: 0.18)) {
                                 launcher.settings.viewStyle = launcher.settings.viewStyle.toggled
                             }
                         } label: {
                             Image(systemName: launcher.settings.viewStyle.toggled.symbolName)
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.85))
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(SparkTheme.textPrimary)
                         }
                         .accessibilityLabel("Switch to \(launcher.settings.viewStyle.toggled.title)")
 
                         Button {
                             route = .customizeLauncher
                         } label: {
-                            Image(systemName: "paintbrush.pointed.fill")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.85))
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundColor(SparkTheme.textPrimary)
                         }
+                        .accessibilityLabel("Customize launcher")
 
                         Button {
-                            route = .archives
+                            presentArchivePicker()
                         } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 19, weight: .semibold))
-                                .foregroundColor(accent)
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(SparkTheme.textPrimary)
                         }
+                        .accessibilityLabel("Import game")
                     }
                 }
             }
@@ -115,12 +104,8 @@ struct LibraryView: View {
                 isPresented: $showCoverSourceDialog,
                 titleVisibility: .visible
             ) {
-                Button("Choose from Photos") {
-                    if let target = coverTarget { open(route: .coverPhoto(target), delay: 0.35) }
-                }
-                Button("Choose from Files") {
-                    if let target = coverTarget { open(route: .coverFile(target), delay: 0.35) }
-                }
+                Button("Choose from Photos") { presentPhotoCover() }
+                Button("Choose from Files") { presentFileCover() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Pick an image to represent this game in your library.")
@@ -135,7 +120,7 @@ struct LibraryView: View {
                         do {
                             try store.delete(target)
                         } catch {
-                            store.errorMessage = error.localizedDescription
+                            presentError(error.localizedDescription)
                         }
                     }
                 }
@@ -146,6 +131,23 @@ struct LibraryView: View {
             .fullScreenCover(item: $selectedGame) { game in
                 GamePlayerView(game: game)
             }
+            .alert(item: $alert) { item in
+                Alert(
+                    title: Text(item.title),
+                    message: Text(item.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
+            .onChange(of: coordinator.failureMessage) { message in
+                guard let message = message else { return }
+                presentError(message, title: "Import failed")
+                coordinator.clearFailure()
+            }
+            .onChange(of: store.errorMessage) { message in
+                guard let message = message else { return }
+                presentError(message)
+                store.errorMessage = nil
+            }
         }
         .navigationViewStyle(StackNavigationViewStyle())
         .onAppear(perform: configureNavigationBar)
@@ -155,32 +157,37 @@ struct LibraryView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("GAME LIBRARY")
-                .font(.system(size: 10, weight: .bold))
-                .tracking(2.4)
-                .foregroundColor(accent)
+            Text("LIBRARY")
+                .sparkSectionLabel()
 
             Text(launcher.settings.headerTitle)
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
-                .foregroundColor(.white)
+                .font(.system(size: 30, weight: .bold))
+                .foregroundColor(SparkTheme.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
             Text(subtitle)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white.opacity(0.55))
+                .font(.system(size: 12))
+                .foregroundColor(SparkTheme.textSecondary)
         }
         .padding(.horizontal, 20)
-        .padding(.top, 10)
+        .padding(.top, 6)
     }
 
     private var subtitle: String {
         let count = store.games.count
         let gamesText = "\(count) game\(count == 1 ? "" : "s")"
         if let free = DiskSpace.formattedAvailable(at: AppPaths.documents) {
-            return "\(gamesText)  •  \(free) free  •  iOS 15+"
+            return "\(gamesText) · \(free) free"
         }
-        return "\(gamesText)  •  iOS 15+"
+        return gamesText
+    }
+
+    private var ambientCoverURL: URL? {
+        let sorted = store.games.sorted {
+            ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast)
+        }
+        return sorted.first?.coverURL
     }
 
     // MARK: - Search and filters
@@ -188,13 +195,13 @@ struct LibraryView: View {
     private var searchField: some View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(0.45))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(SparkTheme.textTertiary)
 
-            TextField("Search your library", text: $searchText)
+            TextField("Search", text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(.system(size: 14))
-                .foregroundColor(.white)
+                .foregroundColor(SparkTheme.textPrimary)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
 
@@ -203,17 +210,17 @@ struct LibraryView: View {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(SparkTheme.textTertiary)
                 }
             }
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 11)
-        .glassCard(cornerRadius: 13, opacity: 0.45)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .sparkPanel(cornerRadius: 10, fill: SparkTheme.panel)
         .padding(.horizontal, 20)
     }
 
-    private var filterChips: some View {
+    private var filterRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 chip(title: "All", isSelected: engineFilter == nil) {
@@ -224,6 +231,8 @@ struct LibraryView: View {
                         engineFilter = (engineFilter == engine) ? nil : engine
                     }
                 }
+
+                sortMenu
             }
             .padding(.horizontal, 20)
         }
@@ -237,17 +246,51 @@ struct LibraryView: View {
     private func chip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(isSelected ? .white : .white.opacity(0.6))
-                .padding(.horizontal, 13)
-                .padding(.vertical, 7)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(isSelected ? SparkTheme.textPrimary : SparkTheme.textSecondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
                 .background(
-                    Capsule()
-                        .fill(isSelected ? accent.opacity(0.85) : Color.white.opacity(0.07))
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isSelected ? Color.white.opacity(0.12) : Color.clear)
                 )
                 .overlay(
-                    Capsule().stroke(Color.white.opacity(isSelected ? 0.22 : 0.08), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(
+                            isSelected ? Color.white.opacity(0.16) : SparkTheme.hairline,
+                            lineWidth: SparkTheme.hairlineWidth
+                        )
                 )
+        }
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            ForEach(LibrarySort.allCases) { sort in
+                Button {
+                    launcher.settings.sort = sort
+                } label: {
+                    if launcher.settings.sort == sort {
+                        Label(sort.title, systemImage: "checkmark")
+                    } else {
+                        Text(sort.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(launcher.settings.sort.title)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundColor(SparkTheme.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
+            )
         }
     }
 
@@ -271,15 +314,13 @@ struct LibraryView: View {
 
     private var prismGrid: some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: launcher.settings.cardSize.minimumWidth), spacing: 16)],
-            spacing: 18
+            columns: [GridItem(.adaptive(minimum: launcher.settings.cardSize.minimumWidth), spacing: 14)],
+            spacing: 16
         ) {
             ForEach(filteredGames) { game in
                 GameCardView(
                     game: game,
                     cardSize: launcher.settings.cardSize,
-                    glassOpacity: launcher.settings.glassOpacity,
-                    accent: accent,
                     lineColor: launcher.settings.lineColor(for: game),
                     onOpen: { openGame(game) },
                     onRename: { route = .rename(game) },
@@ -301,12 +342,11 @@ struct LibraryView: View {
     }
 
     private var sparkLines: some View {
-        LazyVStack(spacing: 9) {
+        LazyVStack(spacing: 8) {
             ForEach(filteredGames) { game in
                 SparkLineRowView(
                     game: game,
                     lineColor: launcher.settings.lineColor(for: game),
-                    glassOpacity: launcher.settings.glassOpacity,
                     onOpen: { openGame(game) },
                     onRename: { route = .rename(game) },
                     onSetCover: {
@@ -335,62 +375,58 @@ struct LibraryView: View {
         do {
             _ = try store.backupSaves(for: game)
         } catch {
-            store.errorMessage = error.localizedDescription
+            presentError(error.localizedDescription)
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(accent.opacity(0.14))
-                    .frame(width: 96, height: 96)
-                Image(systemName: "sparkles")
-                    .font(.system(size: 34, weight: .light))
-                    .foregroundColor(accent)
-            }
+        VStack(spacing: 14) {
+            Image(systemName: "tray")
+                .font(.system(size: 26, weight: .light))
+                .foregroundColor(SparkTheme.textTertiary)
 
-            Text("Your library is empty")
-                .font(.system(size: 19, weight: .bold))
-                .foregroundColor(.white)
+            Text("No games yet")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(SparkTheme.textPrimary)
 
-            Text("Import a .zip, .7z, .rar or .apk, or drop an extracted game into\nOn My iPad / SparkRPGM / games and pull to refresh.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.55))
+            Text("Import a .zip, .7z, .rar or .apk, or copy a game folder into On My iPad / SparkRPGM / games and pull to refresh.")
+                .font(.system(size: 12))
+                .foregroundColor(SparkTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
-                route = .archives
+                presentArchivePicker()
             } label: {
-                HStack(spacing: 8) {
+                HStack(spacing: 7) {
                     Image(systemName: "plus")
+                        .font(.system(size: 12, weight: .semibold))
                     Text("Import a game")
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
                 .background(accent)
                 .foregroundColor(.white)
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 24)
-        .padding(.vertical, 46)
-        .glassCard(cornerRadius: 22, opacity: 0.30)
+        .padding(.vertical, 40)
+        .sparkPanel(cornerRadius: 14)
         .padding(.horizontal, 20)
     }
 
     private var noResultsState: some View {
         VStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 24, weight: .light))
-                .foregroundColor(.white.opacity(0.35))
+                .font(.system(size: 22, weight: .light))
+                .foregroundColor(SparkTheme.textTertiary)
             Text("No games match this filter")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(SparkTheme.textSecondary)
             Button("Clear filters") {
                 searchText = ""
                 engineFilter = nil
@@ -399,76 +435,36 @@ struct LibraryView: View {
             .foregroundColor(accent)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, 36)
     }
 
     private var footerHint: some View {
-        VStack(spacing: 5) {
-            Text("Pull down to rescan  •  Long-press a game for more")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.white.opacity(0.35))
-            Text("Tap the \(launcher.settings.viewStyle.toggled.title) icon to switch layout")
-                .font(.system(size: 10, weight: .regular))
-                .foregroundColor(.white.opacity(0.25))
-            Text("Files.app: On My iPad / SparkRPGM")
-                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                .foregroundColor(.white.opacity(0.25))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 22)
+        Text("Pull down to rescan · Long-press a game for options")
+            .font(.system(size: 11))
+            .foregroundColor(SparkTheme.textTertiary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 18)
     }
 
     // MARK: - Overlays
 
     @ViewBuilder
-    private var toastOverlay: some View {
-        VStack {
-            Spacer()
-            if let message = store.toastMessage ?? coordinator.errorBanner {
-                Text(message)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .glassCard(cornerRadius: 14, opacity: 0.72)
-                    .padding(.horizontal, 30)
-                    .padding(.bottom, 30)
+    private var importBanner: some View {
+        if coordinator.isShowingProgress, let job = coordinator.activeJob {
+            VStack {
+                Spacer()
+                ImportBanner(job: job, activeCount: coordinator.activeCount)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 22)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .onTapGesture {
-                        coordinator.clearError()
-                    }
             }
+            .animation(.easeOut(duration: 0.2))
+            .allowsHitTesting(false)
         }
-        .animation(.easeOut(duration: 0.2))
     }
 
-    @ViewBuilder
-    private var errorOverlay: some View {
-        if let error = store.errorMessage {
-            VStack {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(Color(red: 1, green: 0.72, blue: 0.35))
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundColor(.white)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button {
-                        store.errorMessage = nil
-                    } label: {
-                        Image(systemName: "xmark")
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                }
-                .padding(13)
-                .glassCard(cornerRadius: 14, opacity: 0.82)
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                Spacer()
-            }
-        }
+    private func presentError(_ message: String, title: String = "Something went wrong") {
+        alert = LibraryAlert(title: title, message: message)
     }
 
     // MARK: - Data
@@ -513,46 +509,12 @@ struct LibraryView: View {
     @ViewBuilder
     private func sheetView(for route: LibraryRoute) -> some View {
         switch route {
-        case .archives:
-            FilePicker(
-                isPresented: routeBinding(),
-                contentTypes: FilePickerTypes.archives,
-                allowsMultipleSelection: true,
-                onPicked: handleArchivePick
-            )
-
-        case .coverPhoto(let game):
-            PhotoPicker(isPresented: routeBinding()) { image in
-                try? store.setCustomCover(image, for: game)
-            }
-
-        case .coverFile(let game):
-            FilePicker(
-                isPresented: routeBinding(),
-                contentTypes: FilePickerTypes.images,
-                allowsMultipleSelection: false,
-                onPicked: { urls in
-                    guard let url = urls.first else { return }
-                    let scope = SecurityScopedResource(url)
-                    defer { _ = scope }
-                    guard let data = try? Data(contentsOf: url), let image = UIImage(data: data) else {
-                        store.errorMessage = "That image could not be read."
-                        return
-                    }
-                    do {
-                        try store.setCustomCover(image, for: game)
-                    } catch {
-                        store.errorMessage = error.localizedDescription
-                    }
-                }
-            )
-
         case .rename(let game):
             RenameSheet(game: game) { newTitle in
                 do {
                     try store.rename(game, to: newTitle)
                 } catch {
-                    store.errorMessage = error.localizedDescription
+                    presentError(error.localizedDescription)
                 }
             }
 
@@ -561,32 +523,50 @@ struct LibraryView: View {
 
         case .customizeLauncher:
             LauncherCustomizationView()
-
-        case .importProgress:
-            ImportProgressView(coordinator: coordinator)
         }
     }
 
-    private func routeBinding() -> Binding<Bool> {
-        Binding(
-            get: { route != nil },
-            set: { presented in
-                if !presented { route = nil }
+    // MARK: - Pickers
+
+    private func presentArchivePicker() {
+        DocumentPickerPresenter.shared.present(
+            contentTypes: DocumentPickerTypes.archives,
+            allowsMultipleSelection: true
+        ) { documents in
+            guard !documents.isEmpty else { return }
+            coordinator.enqueue(documents: documents)
+        }
+    }
+
+    private func presentPhotoCover() {
+        guard let target = coverTarget else { return }
+        PhotoPickerPresenter.shared.present { image in
+            guard let image = image else { return }
+            do {
+                try store.setCustomCover(image, for: target)
+            } catch {
+                presentError(error.localizedDescription)
             }
-        )
-    }
-
-    private func open(route newRoute: LibraryRoute, delay: TimeInterval) {
-        route = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            route = newRoute
         }
     }
 
-    private func handleArchivePick(_ urls: [URL]) {
-        guard !urls.isEmpty else { return }
-        coordinator.enqueue(urls: urls)
-        open(route: .importProgress, delay: 0.45)
+    private func presentFileCover() {
+        guard let target = coverTarget else { return }
+        DocumentPickerPresenter.shared.present(
+            contentTypes: DocumentPickerTypes.images,
+            allowsMultipleSelection: false
+        ) { documents in
+            guard let document = documents.first,
+                  let data = try? Data(contentsOf: document.url),
+                  let image = UIImage(data: data) else {
+                return
+            }
+            do {
+                try store.setCustomCover(image, for: target)
+            } catch {
+                presentError(error.localizedDescription)
+            }
+        }
     }
 
     // MARK: - Chrome

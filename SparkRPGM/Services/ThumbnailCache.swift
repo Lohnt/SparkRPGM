@@ -12,7 +12,7 @@ final class ThumbnailCache {
     static let shared = ThumbnailCache()
 
     private let cache = NSCache<NSString, UIImage>()
-    private let queue = DispatchQueue(label: "com.sparkrpgm.thumbnails", qos: .userInitiated, attributes: .concurrent)
+    private let queue = DispatchQueue(label: "com.faith.sparkrpgm.thumbnails", qos: .userInitiated, attributes: .concurrent)
 
     private init() {
         cache.countLimit = 80

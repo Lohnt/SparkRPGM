@@ -44,7 +44,7 @@ enum LibraryViewStyle: String, Codable, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .sparkLines: return "A fast text-first list — no cover art"
+        case .sparkLines: return "A fast text-first list without cover art"
         case .prismIcons: return "A cover grid with large artwork"
         }
     }
@@ -102,9 +102,14 @@ struct LauncherSettings: Codable, Equatable {
     var accentLineAutoByEngine: Bool = false
 
     var wallpaperBlur: Double = 12
-    var dimOpacity: Double = 0.38
-    var glassOpacity: Double = 0.32
+    var dimOpacity: Double = 0.22
+    var glassOpacity: Double = 0.18
     var wallpaperVersion: Int = 0
+
+    /// Bleeds the most recently played game's cover behind the library header
+    /// when no custom wallpaper is set (or alongside one, at low intensity).
+    var ambientCoverEnabled: Bool = true
+    var ambientCoverIntensity: Double = 0.55
 
     /// `nil` = the primary AppIcon.
     var appIconName: String?
@@ -121,6 +126,8 @@ struct LauncherSettings: Codable, Equatable {
         case dimOpacity
         case glassOpacity
         case wallpaperVersion
+        case ambientCoverEnabled
+        case ambientCoverIntensity
         case appIconName
     }
 
@@ -172,17 +179,26 @@ extension LauncherSettings {
         dimOpacity = try container.decodeIfPresent(Double.self, forKey: .dimOpacity) ?? fallback.dimOpacity
         glassOpacity = try container.decodeIfPresent(Double.self, forKey: .glassOpacity) ?? fallback.glassOpacity
         wallpaperVersion = try container.decodeIfPresent(Int.self, forKey: .wallpaperVersion) ?? fallback.wallpaperVersion
+        ambientCoverEnabled = try container.decodeIfPresent(Bool.self, forKey: .ambientCoverEnabled)
+            ?? fallback.ambientCoverEnabled
+        ambientCoverIntensity = try container.decodeIfPresent(Double.self, forKey: .ambientCoverIntensity)
+            ?? fallback.ambientCoverIntensity
         appIconName = try container.decodeIfPresent(String.self, forKey: .appIconName)
     }
 }
 
 final class LauncherSettingsStore: ObservableObject {
 
-    private static let storageKey = "sparkrpgm.launcher.settings.v1"
+    private static let storageKey = "com.faith.sparkrpgm.launcher.settings.v1"
 
     @Published var settings: LauncherSettings {
         didSet { scheduleSave() }
     }
+
+    /// Extra change signal for the wallpaper image. `wallpaperVersion` lives in
+    /// the persisted settings, while this counter guarantees a SwiftUI refresh
+    /// even when the value written happens to round-trip to the same number.
+    @Published private(set) var wallpaperRevision = 0
 
     private var saveWorkItem: DispatchWorkItem?
 
@@ -203,31 +219,63 @@ final class LauncherSettingsStore: ObservableObject {
         updated.accentHex = LauncherSettings.default.accentHex
         updated.accentLineHex = LauncherSettings.default.accentLineHex
         updated.accentLineAutoByEngine = LauncherSettings.default.accentLineAutoByEngine
+        updated.ambientCoverEnabled = LauncherSettings.default.ambientCoverEnabled
+        updated.ambientCoverIntensity = LauncherSettings.default.ambientCoverIntensity
         updated.wallpaperVersion += 1
         settings = updated
+        wallpaperRevision += 1
     }
 
     func bumpWallpaper() {
         var updated = settings
         updated.wallpaperVersion += 1
         settings = updated
+        wallpaperRevision += 1
     }
 
-    func setWallpaper(_ image: UIImage) -> Bool {
-        guard let data = ImageTools.jpegData(from: image, maxPixel: 2400, quality: 0.9) else { return false }
-        do {
-            try FileManager.default.createDirectory(at: AppPaths.theme, withIntermediateDirectories: true, attributes: nil)
-            try data.write(to: AppPaths.wallpaper, options: .atomic)
-            bumpWallpaper()
-            return true
-        } catch {
-            Log.error("Wallpaper write failed", error: error)
-            return false
+    /// Encodes and writes `theme/wallpaper.jpg` off the main thread, then
+    /// publishes a revision so `LauncherBackground` reloads immediately.
+    func setWallpaper(_ image: UIImage, completion: ((Bool) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let data = autoreleasepool {
+                ImageTools.jpegData(from: image, maxPixel: 2400, quality: 0.9)
+            }
+
+            var didWrite = false
+            if let data = data {
+                do {
+                    try AppPaths.atomicWrite(data, to: AppPaths.wallpaper)
+                    didWrite = true
+                } catch {
+                    Log.error("Wallpaper write failed", error: error)
+                }
+            }
+
+            DispatchQueue.main.async {
+                guard let self = self else {
+                    completion?(false)
+                    return
+                }
+                if didWrite {
+                    ThumbnailCache.shared.clear()
+                    var updated = self.settings
+                    updated.wallpaperVersion += 1
+                    // A freshly picked wallpaper should be visible right away,
+                    // so pull back an over-dark persisted overlay.
+                    if updated.dimOpacity > 0.45 {
+                        updated.dimOpacity = 0.30
+                    }
+                    self.settings = updated
+                    self.wallpaperRevision += 1
+                }
+                completion?(didWrite)
+            }
         }
     }
 
     func removeWallpaper() {
         try? FileManager.default.removeItem(at: AppPaths.wallpaper)
+        ThumbnailCache.shared.clear()
         bumpWallpaper()
     }
 

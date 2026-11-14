@@ -1,59 +1,61 @@
-import SwiftUI
-import PhotosUI
 import UIKit
+import PhotosUI
 
-/// iOS 15 safe Photos picker (PHPickerViewController).
+/// Direct UIKit wrapper around `PHPickerViewController`.
 ///
-/// Using PHPicker means no `NSPhotoLibraryUsageDescription` permission prompt
-/// and no access to the user's whole library.
-struct PhotoPicker: UIViewControllerRepresentable {
+/// Like `DocumentPickerPresenter`, this presents from the key window instead of
+/// a nested SwiftUI sheet. On iPadOS 15 a second `.sheet` inside the
+/// customization sheet could dismiss without ever invoking its callback, which
+/// made picking a wallpaper silently do nothing.
+///
+/// `PHPicker` needs no photo-library permission and only ever sees the image the
+/// player explicitly selects.
+final class PhotoPickerPresenter: NSObject, PHPickerViewControllerDelegate {
 
-    @Binding var isPresented: Bool
-    let onPicked: (UIImage) -> Void
+    static let shared = PhotoPickerPresenter()
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+    private var completion: ((UIImage?) -> Void)?
+
+    private override init() {
+        super.init()
     }
 
-    func makeUIViewController(context: Context) -> PHPickerViewController {
+    func present(onPicked: @escaping (UIImage?) -> Void) {
+        guard let presenter = ViewPresenter.topViewController() else { return }
+
         var configuration = PHPickerConfiguration(photoLibrary: .shared())
         configuration.filter = .images
         configuration.selectionLimit = 1
         configuration.preferredAssetRepresentationMode = .current
 
+        completion = onPicked
+
         let picker = PHPickerViewController(configuration: configuration)
-        picker.delegate = context.coordinator
-        return picker
+        picker.delegate = self
+        picker.modalPresentationStyle = .formSheet
+        presenter.present(picker, animated: true, completion: nil)
     }
 
-    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+    // MARK: - PHPickerViewControllerDelegate
 
-    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        let callback = completion
+        completion = nil
 
-        private let parent: PhotoPicker
-
-        init(_ parent: PhotoPicker) {
-            self.parent = parent
-        }
-
-        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            picker.dismiss(animated: true) {
-                DispatchQueue.main.async {
-                    self.parent.isPresented = false
-                }
-            }
-
+        picker.dismiss(animated: true) {
             guard let provider = results.first?.itemProvider,
-                  provider.canLoadObject(ofClass: UIImage.self) else { return }
+                  provider.canLoadObject(ofClass: UIImage.self) else {
+                DispatchQueue.main.async { callback?(nil) }
+                return
+            }
 
             provider.loadObject(ofClass: UIImage.self) { object, error in
                 if let error = error {
                     Log.error("Photo picker load failed", error: error)
-                    return
                 }
-                guard let image = object as? UIImage else { return }
+                let image = object as? UIImage
                 DispatchQueue.main.async {
-                    self.parent.onPicked(image)
+                    callback?(image)
                 }
             }
         }

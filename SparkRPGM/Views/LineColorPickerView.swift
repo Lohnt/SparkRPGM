@@ -3,8 +3,8 @@ import SwiftUI
 /// Sheet used by `Change Line Color` in a game's long-press menu.
 ///
 /// Stores a per-game hex override in `GameMetadata.accentColorHex`. Clearing the
-/// override (or tapping *Launcher Colour*) falls back to the launcher-wide line
-/// colour, which may itself be *Auto by engine*.
+/// override falls back to the launcher-wide line colour, which may itself be
+/// coloured by engine.
 struct LineColorPickerView: View {
 
     let game: Game
@@ -20,6 +20,8 @@ struct LineColorPickerView: View {
         _selection = State(initialValue: game.lineColorHex ?? "")
     }
 
+    private var accent: Color { launcher.settings.accentColor }
+
     private var effectiveColor: Color {
         selection.isEmpty ? launcher.settings.lineColor(for: game) : Color(hex: selection)
     }
@@ -27,79 +29,71 @@ struct LineColorPickerView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color(red: 0.05, green: 0.05, blue: 0.08).ignoresSafeArea()
+                SparkTheme.canvas.ignoresSafeArea()
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 16) {
                         previewSection
                         presetSection
                         customSection
                         fallbackSection
                     }
-                    .padding(20)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
                     .padding(.bottom, 30)
                 }
             }
-            .navigationTitle("Line Color")
+            .navigationTitle("Line Colour")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { dismiss() }
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(launcher.settings.accentColor)
+                        .foregroundColor(accent)
                 }
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Sections
 
     private var previewSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(game.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
-                .lineLimit(1)
-
+        section("PREVIEW") {
             HStack(spacing: 0) {
                 RoundedRectangle(cornerRadius: 2, style: .continuous)
                     .fill(effectiveColor)
                     .frame(width: 4)
                     .padding(.vertical, 12)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(game.title)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(SparkTheme.textPrimary)
                         .lineLimit(1)
                     Text(game.statsLine)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.white.opacity(0.55))
+                        .font(.system(size: 11))
+                        .foregroundColor(SparkTheme.textSecondary)
                 }
                 .padding(.leading, 12)
 
                 Spacer(minLength: 8)
             }
             .padding(.trailing, 14)
-            .background(Color.black.opacity(0.55))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(SparkTheme.panelRaised)
+            )
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
             )
         }
-        .padding(16)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var presetSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Presets")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
-
+        section("PRESETS") {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 6), spacing: 10) {
                 ForEach(LauncherSettings.linePresets, id: \.self) { hex in
                     Button {
@@ -107,29 +101,23 @@ struct LineColorPickerView: View {
                     } label: {
                         Circle()
                             .fill(Color(hex: hex))
-                            .frame(width: 34, height: 34)
+                            .frame(width: 32, height: 32)
                             .overlay(
                                 Circle().stroke(
-                                    Color.white.opacity(isSelected(hex) ? 0.95 : 0.12),
-                                    lineWidth: 2
+                                    Color.white.opacity(isSelected(hex) ? 0.9 : 0.10),
+                                    lineWidth: isSelected(hex) ? 2 : 1
                                 )
                             )
                             .frame(maxWidth: .infinity)
                     }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
         }
-        .padding(16)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var customSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Custom")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.white.opacity(0.7))
-
+        section("CUSTOM") {
             ColorPicker(
                 "Pick a colour",
                 selection: Binding(
@@ -138,54 +126,72 @@ struct LineColorPickerView: View {
                 ),
                 supportsOpacity: false
             )
-            .font(.system(size: 12))
-            .foregroundColor(.white.opacity(0.7))
+            .font(.system(size: 13))
+            .foregroundColor(SparkTheme.textSecondary)
 
             Button {
                 apply(game.engine.badgeColor.hexString)
             } label: {
-                HStack(spacing: 7) {
+                HStack(spacing: 6) {
                     Image(systemName: "wand.and.stars")
+                        .font(.system(size: 11))
                     Text("Match \(game.engine.rawValue) engine colour")
+                        .font(.system(size: 12, weight: .medium))
                 }
-                .font(.system(size: 12, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(Color.white.opacity(0.07))
-                .foregroundColor(.white.opacity(0.8))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .foregroundColor(SparkTheme.textSecondary)
             }
+            .buttonStyle(PlainButtonStyle())
         }
-        .padding(16)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var fallbackSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Button {
                 selection = ""
                 store.setLineColor(nil, for: game)
             } label: {
-                HStack(spacing: 7) {
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11))
                     Text("Use Launcher Colour")
+                        .font(.system(size: 13, weight: .medium))
                 }
-                .font(.system(size: 13, weight: .semibold))
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.white.opacity(0.06))
-                .foregroundColor(.white.opacity(0.75))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.vertical, 11)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .foregroundColor(SparkTheme.textSecondary)
             }
+            .buttonStyle(PlainButtonStyle())
 
             Text(launcher.settings.accentLineAutoByEngine
-                 ? "The launcher line colour is currently automatic (one colour per engine)."
+                 ? "The launcher line colour is currently automatic, one colour per engine."
                  : "The launcher line colour is \(launcher.settings.accentLineHex).")
                 .font(.system(size: 10))
-                .foregroundColor(.white.opacity(0.35))
+                .foregroundColor(SparkTheme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    // MARK: - Building blocks
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .sparkSectionLabel()
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .sparkPanel(cornerRadius: 14)
     }
 
     // MARK: - Actions

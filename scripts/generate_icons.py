@@ -2,9 +2,18 @@
 """
 SparkRPGM icon generator.
 
-Produces fully-populated .appiconset bundles (iPhone + iPad + marketing sizes)
-for the primary icon and the five alternate icons, plus 1024x1024 preview PNGs
-used by the in-app App Icon picker.
+Renders ten flat, graphic 2D icons built around the Spark emblem (a four-point
+star, a secondary star and a dot), then writes:
+
+* fully-populated `.appiconset` bundles (iPhone + iPad + marketing sizes),
+* loose PNGs at the app bundle root (`Resources/IconAssets`) used by
+  `UIApplication.setAlternateIconName`,
+* 1024x1024 previews for the in-app icon picker.
+
+The loose-PNG export is what keeps alternate-icon switching working on
+iOS 15 / TrollStore: `CFBundleAlternateIcons` entries point at plain bundle
+files and never at an asset-catalog slot, which is what surfaced
+`OSStatus error -54`.
 
 Usage:
     python scripts/generate_icons.py [--repo-root .]
@@ -18,24 +27,30 @@ import argparse
 import json
 import math
 import os
+import random
 import sys
 
 try:
-    from PIL import Image, ImageDraw, ImageFilter
+    from PIL import Image, ImageChops, ImageDraw
 except ImportError:  # pragma: no cover - handled with a clear message
     sys.stderr.write("Pillow is required: python -m pip install pillow\n")
     raise
 
 # ---------------------------------------------------------------------------
-# Palettes: (top colour, bottom colour, spark colour, glow colour, style)
+# Icon catalogue: (asset set name, picker title, preview file stem, renderer)
 # ---------------------------------------------------------------------------
+
 ICON_SETS = [
-    ("AppIcon", "Default", (0x6D, 0x5B, 0xFF), (0x2A, 0x1A, 0x6B), (0xFF, 0xFF, 0xFF), (0xA9, 0x8B, 0xFF), "spark"),
-    ("IconMidnight", "Midnight", (0x10, 0x2A, 0x43), (0x03, 0x08, 0x14), (0x6C, 0xE7, 0xFF), (0x2A, 0xC7, 0xE8), "spark"),
-    ("IconRetro", "Retro", (0xFF, 0x8A, 0x3D), (0xB3, 0x23, 0x6B), (0xFF, 0xF3, 0xD6), (0xFF, 0xD1, 0x66), "pixel"),
-    ("IconCrimson", "Crimson", (0x8E, 0x12, 0x2B), (0x33, 0x03, 0x0B), (0xFF, 0xD2, 0x6E), (0xFF, 0x6B, 0x4F), "spark"),
-    ("IconNeon", "Neon", (0x14, 0x00, 0x2B), (0x00, 0x00, 0x00), (0x5B, 0xFF, 0xC4), (0x9B, 0x5B, 0xFF), "grid"),
-    ("IconMinimal", "Minimal", (0xF7, 0xF7, 0xFA), (0xD9, 0xDB, 0xE3), (0x1C, 0x1D, 0x24), (0x9A, 0x9C, 0xAB), "minimal"),
+    ("AppIcon", "Default", "PreviewDefault", "default"),
+    ("IconEditor", "Editor", "PreviewEditor", "editor"),
+    ("IconOrbit", "Orbit", "PreviewOrbit", "orbit"),
+    ("IconVinyl", "Vinyl", "PreviewVinyl", "vinyl"),
+    ("IconCosmos", "Cosmos", "PreviewCosmos", "cosmos"),
+    ("IconAmethyst", "Amethyst", "PreviewAmethyst", "amethyst"),
+    ("IconY2KDisc", "Y2K Disc", "PreviewY2KDisc", "y2k"),
+    ("IconCassette", "Cassette", "PreviewCassette", "cassette"),
+    ("IconInvincible", "Invincible", "PreviewInvincible", "invincible"),
+    ("IconBlueprint", "Blueprint", "PreviewBlueprint", "blueprint"),
 ]
 
 # iPhone + iPad app icon sizes (base points, scale)
@@ -45,169 +60,441 @@ MARKETING_SIZE = (1024, 1)
 
 SUPERSAMPLE = 2
 
+# ---------------------------------------------------------------------------
+# Palette helpers
+# ---------------------------------------------------------------------------
+
+
+def rgb(hex_value: str) -> tuple:
+    value = hex_value.lstrip("#")
+    return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+
 
 def lerp(a: float, b: float, t: float) -> float:
     return a + (b - a) * t
 
 
-def vertical_gradient(size: int, top: tuple, bottom: tuple) -> Image.Image:
-    """Linear top->bottom gradient with a subtle diagonal light sweep.
+def flat_canvas(size: int, colour: tuple) -> Image.Image:
+    return Image.new("RGBA", (size, size), colour + (255,))
 
-    The vertical ramp is built as a 1xN strip and stretched, which keeps the
-    generator fast enough to run inside CI. The diagonal sheen is a second
-    low-resolution ramp that is upscaled and blended on top.
-    """
+
+def gradient_canvas(size: int, top: tuple, bottom: tuple) -> Image.Image:
     strip = Image.new("RGB", (1, size))
     px = strip.load()
     for y in range(size):
         t = y / max(1, size - 1)
-        tt = t ** 0.85
         px[0, y] = (
-            int(lerp(top[0], bottom[0], tt)),
-            int(lerp(top[1], bottom[1], tt)),
-            int(lerp(top[2], bottom[2], tt)),
+            int(lerp(top[0], bottom[0], t)),
+            int(lerp(top[1], bottom[1], t)),
+            int(lerp(top[2], bottom[2], t)),
         )
-    img = strip.resize((size, size), Image.BILINEAR)
-
-    # Diagonal sheen: bright top-left, transparent bottom-right.
-    ramp_w = 256
-    ramp = Image.new("L", (ramp_w, ramp_w))
-    rpx = ramp.load()
-    for y in range(ramp_w):
-        for x in range(ramp_w):
-            d = (x / ramp_w) * 0.55 + (1.0 - y / ramp_w) * 0.45
-            rpx[x, y] = int(max(0.0, min(1.0, d)) * 26)
-    sheen = Image.new("RGB", (size, size), (255, 255, 255))
-    img = Image.composite(sheen, img, ramp.resize((size, size), Image.BICUBIC))
-    return img
+    return strip.resize((size, size), Image.BILINEAR).convert("RGBA")
 
 
-def radial_glow(size: int, colour: tuple, alpha: int, radius_factor: float) -> Image.Image:
-    layer = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    cx = size * 0.5
-    cy = size * 0.46
-    max_r = size * radius_factor
-    steps = 48
-    for i in range(steps, 0, -1):
-        t = i / steps
-        r = max_r * t
-        a = int(alpha * (1.0 - t) ** 1.6)
-        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=colour + (a,))
-    return layer.filter(ImageFilter.GaussianBlur(size * 0.02))
+# ---------------------------------------------------------------------------
+# Emblem
+# ---------------------------------------------------------------------------
 
 
-def star_polygon(cx: float, cy: float, outer: float, inner: float, points: int = 4, rotation: float = 0.0):
+def star_polygon(cx: float, cy: float, outer: float, inner: float, points: int = 4):
     pts = []
     for i in range(points * 2):
         r = outer if i % 2 == 0 else inner
-        angle = math.pi * 2 * i / (points * 2) - math.pi / 2 + rotation
+        angle = math.pi * 2 * i / (points * 2) - math.pi / 2
         pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
     return pts
 
 
-def draw_spark(draw: ImageDraw.ImageDraw, size: int, colour: tuple, shadow: tuple):
-    cx, cy = size * 0.5, size * 0.5
-    outer = size * 0.34
-    inner = size * 0.105
+def draw_star(
+    draw: ImageDraw.ImageDraw,
+    cx: float,
+    cy: float,
+    outer: float,
+    inner: float,
+    fill: tuple,
+    outline: tuple | None = None,
+    outline_width: float = 0.0,
+):
+    if outline is not None and outline_width > 0:
+        draw.polygon(
+            star_polygon(cx, cy, outer + outline_width, inner + outline_width * 0.55),
+            fill=outline + (255,),
+        )
+    draw.polygon(star_polygon(cx, cy, outer, inner), fill=fill + (255,))
 
-    # soft shadow under the glyph
-    shadow_offset = size * 0.012
-    draw.polygon(
-        star_polygon(cx + shadow_offset, cy + shadow_offset, outer * 1.01, inner * 1.01),
-        fill=shadow + (110,),
+
+def draw_emblem(
+    draw: ImageDraw.ImageDraw,
+    size: int,
+    fill: tuple,
+    outline: tuple | None = None,
+    cx: float | None = None,
+    cy: float | None = None,
+    scale: float = 1.0,
+    secondary: bool = True,
+    outline_weight: float = 0.012,
+):
+    """Four-point Spark star plus the secondary star and dot."""
+    cx = size * 0.5 if cx is None else cx
+    cy = size * 0.5 if cy is None else cy
+
+    outer = size * 0.335 * scale
+    inner = size * 0.104 * scale
+    outline_width = size * outline_weight * scale
+
+    draw_star(draw, cx, cy, outer, inner, fill, outline, outline_width)
+
+    if not secondary:
+        return
+
+    if outline is not None and outline_width > 0:
+        draw_star(
+            draw,
+            size * 0.735,
+            size * 0.255,
+            size * 0.103 * scale,
+            size * 0.031 * scale,
+            fill,
+            outline,
+            outline_width * 0.7,
+        )
+    else:
+        draw_star(
+            draw,
+            size * 0.735,
+            size * 0.255,
+            size * 0.103 * scale,
+            size * 0.031 * scale,
+            fill,
+        )
+
+    dot_r = size * 0.021 * scale
+    dx, dy = size * 0.262, size * 0.752
+    if outline is not None and outline_width > 0:
+        draw.ellipse(
+            [dx - dot_r - outline_width * 0.6, dy - dot_r - outline_width * 0.6,
+             dx + dot_r + outline_width * 0.6, dy + dot_r + outline_width * 0.6],
+            fill=outline + (255,),
+        )
+    draw.ellipse([dx - dot_r, dy - dot_r, dx + dot_r, dy + dot_r], fill=fill + (255,))
+
+
+# ---------------------------------------------------------------------------
+# Renderers (all flat: no bevels, no drop shadows, no radial glows)
+# ---------------------------------------------------------------------------
+
+
+def render_default(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#0B0B0D"))
+    draw = ImageDraw.Draw(base, "RGBA")
+    draw_emblem(draw, size, rgb("#FFFFFF"))
+    return base
+
+
+def render_editor(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#141417"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    # Editorial colour block on the right third.
+    split = int(size * 0.63)
+    draw.rectangle([split, 0, size, size], fill=rgb("#D9383A") + (255,))
+    # Crisp rule separating the two columns.
+    rule = max(2, int(size * 0.006))
+    draw.rectangle([split - rule, 0, split, size], fill=rgb("#F2F2F4") + (235,))
+
+    # Small masthead marks: two rules above the emblem.
+    line_w = max(2, int(size * 0.010))
+    draw.rectangle([size * 0.10, size * 0.155, size * 0.36, size * 0.155 + line_w],
+                   fill=rgb("#F2F2F4") + (200,))
+    draw.rectangle([size * 0.10, size * 0.20, size * 0.26, size * 0.20 + line_w],
+                   fill=rgb("#F2F2F4") + (110,))
+
+    draw_emblem(draw, size, rgb("#FFFFFF"))
+    return base
+
+
+def render_orbit(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#E84228"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    ring = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    rdraw = ImageDraw.Draw(ring)
+    cx = cy = size * 0.5
+    rx = size * 0.44
+    ry = size * 0.155
+    width = max(3, int(size * 0.016))
+    rdraw.ellipse(
+        [cx - rx, cy - ry, cx + rx, cy + ry],
+        outline=rgb("#FFFFFF") + (235,),
+        width=width,
     )
-    draw.polygon(star_polygon(cx, cy, outer, inner), fill=colour + (255,))
-
-    # secondary sparkle, upper-right
-    sx, sy = size * 0.735, size * 0.255
-    draw.polygon(star_polygon(sx, sy, size * 0.105, size * 0.032), fill=colour + (235,))
-    # tiny dot sparkle, lower-left
-    dx, dy = size * 0.265, size * 0.755
-    draw.ellipse([dx - size * 0.022, dy - size * 0.022, dx + size * 0.022, dy + size * 0.022],
-                 fill=colour + (200,))
-
-
-def draw_pixel_spark(draw: ImageDraw.ImageDraw, size: int, colour: tuple, shadow: tuple):
-    """Chunky 8-bit flavoured spark made of blocks."""
-    unit = size / 16.0
-    blocks = [
-        (7, 1), (8, 1),
-        (7, 2), (8, 2),
-        (6, 3), (7, 3), (8, 3), (9, 3),
-        (5, 4), (6, 4), (7, 4), (8, 4), (9, 4), (10, 4),
-        (6, 5), (7, 5), (8, 5), (9, 5),
-        (7, 6), (8, 6),
-        (7, 7), (8, 7),
-        (6, 8), (7, 8), (8, 8), (9, 8),
-        (5, 9), (6, 9), (7, 9), (8, 9), (9, 9), (10, 9),
-        (6, 10), (7, 10), (8, 10), (9, 10),
-        (7, 11), (8, 11),
-        (7, 12), (8, 12),
-    ]
-    ox, oy = unit * 0.2, unit * 0.2
-    for (bx, by) in blocks:
-        box = [bx * unit + ox, by * unit + oy, (bx + 1) * unit + ox, (by + 1) * unit + oy]
-        draw.rectangle(box, fill=shadow + (90,))
-    for (bx, by) in blocks:
-        box = [bx * unit, by * unit, (bx + 1) * unit - unit * 0.06, (by + 1) * unit - unit * 0.06]
-        draw.rectangle(box, fill=colour + (255,))
-    # accent pixels
-    draw.rectangle([unit * 12.1, unit * 3.1, unit * 13.1, unit * 4.1], fill=colour + (220,))
-    draw.rectangle([unit * 2.1, unit * 11.1, unit * 3.1, unit * 12.1], fill=colour + (220,))
-
-
-def draw_neon_grid(draw: ImageDraw.ImageDraw, size: int, accent: tuple, glow: tuple):
-    step = size / 12.0
-    for i in range(1, 12):
-        a = int(70 * (1.0 - abs(i - 6) / 12.0))
-        draw.line([(0, i * step), (size, i * step)], fill=glow + (a,), width=max(1, int(size * 0.004)))
-        draw.line([(i * step, 0), (i * step, size)], fill=glow + (a,), width=max(1, int(size * 0.004)))
-    draw_spark(draw, size, accent, glow)
-
-
-def draw_minimal(draw: ImageDraw.ImageDraw, size: int, ink: tuple, muted: tuple):
-    margin = size * 0.20
-    radius = size * 0.10
-    draw.rounded_rectangle(
-        [margin, margin, size - margin, size - margin],
-        radius=radius,
-        outline=muted + (140,),
-        width=max(2, int(size * 0.014)),
-    )
-    draw_spark(draw, size, ink, muted)
-
-
-def render_icon(top, bottom, spark, glow, style: str) -> Image.Image:
-    size = 1024 * SUPERSAMPLE
-    base = vertical_gradient(size, top, bottom).convert("RGBA")
-
-    glow_layer = radial_glow(size, spark, 96 if style != "minimal" else 40, 0.62)
-    base = Image.alpha_composite(base, glow_layer)
+    ring = ring.rotate(-18, resample=Image.BICUBIC, center=(cx, cy))
+    base = Image.alpha_composite(base, ring)
 
     draw = ImageDraw.Draw(base, "RGBA")
-    if style == "pixel":
-        draw_pixel_spark(draw, size, spark, glow)
-    elif style == "grid":
-        draw_neon_grid(draw, size, spark, glow)
-    elif style == "minimal":
-        draw_minimal(draw, size, spark, glow)
-    else:
-        draw_spark(draw, size, spark, glow)
+    draw_emblem(draw, size, rgb("#FFFFFF"))
+    return base
 
-    # subtle inner vignette for depth (skip for the flat minimal design)
-    if style != "minimal":
-        vignette = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        vdraw = ImageDraw.Draw(vignette)
-        for i in range(28):
-            t = i / 28.0
-            r = size * (0.72 + 0.30 * t)
-            alpha = int(80 * t ** 2)
-            vdraw.ellipse([size / 2 - r, size / 2 - r, size / 2 + r, size / 2 + r],
-                          outline=(0, 0, 0, 0), width=max(1, int(size * 0.02)))
-        base = Image.alpha_composite(base, vignette)
 
-    return base.convert("RGB").resize((1024, 1024), Image.LANCZOS)
+def render_vinyl(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#0A0A0B"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    cx = cy = size * 0.5
+    disc_r = size * 0.465
+    draw.ellipse([cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r], fill=rgb("#0D0D0F") + (255,))
+    draw.ellipse(
+        [cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r],
+        outline=rgb("#232328") + (255,),
+        width=max(2, int(size * 0.004)),
+    )
+
+    # Concentric grooves.
+    radius = size * 0.30
+    step = size * 0.021
+    index = 0
+    while radius < disc_r - size * 0.012:
+        shade = rgb("#1B1B1F") if index % 2 == 0 else rgb("#26262C")
+        draw.ellipse(
+            [cx - radius, cy - radius, cx + radius, cy + radius],
+            outline=shade + (255,),
+            width=max(1, int(size * 0.0035)),
+        )
+        radius += step
+        index += 1
+
+    # Centre label: dark disc, gold rim, gold Spark.
+    label_r = size * 0.195
+    draw.ellipse([cx - label_r, cy - label_r, cx + label_r, cy + label_r], fill=rgb("#141416") + (255,))
+    draw.ellipse(
+        [cx - label_r, cy - label_r, cx + label_r, cy + label_r],
+        outline=rgb("#F4C44E") + (235,),
+        width=max(2, int(size * 0.006)),
+    )
+
+    draw_star(draw, cx, cy, size * 0.150, size * 0.046, rgb("#F4C44E"))
+    return base
+
+
+def render_cosmos(size: int) -> Image.Image:
+    base = gradient_canvas(size, rgb("#141836"), rgb("#252B5C"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    rng = random.Random(20261114)
+    for _ in range(110):
+        x = rng.uniform(0, size)
+        y = rng.uniform(0, size)
+        r = rng.uniform(size * 0.0016, size * 0.0042)
+        alpha = rng.randint(90, 225)
+        draw.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, alpha))
+
+    # A few brighter four-point specks.
+    for (fx, fy, s) in [(0.19, 0.28, 0.020), (0.83, 0.66, 0.017), (0.70, 0.18, 0.014)]:
+        draw_star(draw, size * fx, size * fy, size * s, size * s * 0.30, (255, 255, 255))
+
+    draw_emblem(draw, size, rgb("#DCE0FF"))
+    return base
+
+
+def render_amethyst(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#2A1746"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    s = size
+    facets = [
+        ([(0, 0.14), (0.46, 0), (0.30, 0.56)], "#6D3EC4"),
+        ([(0.46, 0), (0.94, 0.09), (0.62, 0.49)], "#9B6EF3"),
+        ([(0, 0.14), (0.30, 0.56), (0, 0.78)], "#5A2FA8"),
+        ([(0.94, 0.09), (1, 0.56), (0.62, 0.49)], "#7B4FD0"),
+        ([(0.30, 0.56), (0.62, 0.49), (0.90, 1), (0.14, 1)], "#4A2488"),
+        ([(0, 0.78), (0.30, 0.56), (0.14, 1), (0, 1)], "#3B1B70"),
+    ]
+    for points, colour in facets:
+        draw.polygon([(x * s, y * s) for (x, y) in points], fill=rgb(colour) + (255,))
+
+    # Facet edges.
+    edge = max(1, int(size * 0.0035))
+    for points, _ in facets:
+        draw.line([(x * s, y * s) for (x, y) in points] + [(points[0][0] * s, points[0][1] * s)],
+                  fill=(255, 255, 255, 40), width=edge, joint="curve")
+
+    draw_emblem(draw, size, rgb("#FFFFFF"))
+    return base
+
+
+def render_y2k(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#E6E9F0"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    cx = cy = size * 0.5
+    disc_r = size * 0.465
+    bbox = [cx - disc_r, cy - disc_r, cx + disc_r, cy + disc_r]
+    draw.ellipse(bbox, fill=rgb("#DFE4EF") + (255,))
+    draw.ellipse(bbox, outline=rgb("#B4BCCC") + (255,), width=max(2, int(size * 0.005)))
+
+    # Pastel diagonal sheen bands, clipped to the disc.
+    bands = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    bdraw = ImageDraw.Draw(bands)
+    colours = [rgb("#6FD8EA"), rgb("#F0A6CE"), rgb("#B8A6F5"), rgb("#7FE3C4")]
+    band_w = size * 0.085
+    gap = size * 0.058
+    start = -size * 0.55
+    index = 0
+    diagonal = size * 1.75
+    while start < size * 1.05:
+        colour = colours[index % len(colours)] + (150,)
+        bdraw.polygon(
+            [
+                (start, 0),
+                (start + band_w, 0),
+                (start + band_w - diagonal, size),
+                (start - diagonal, size),
+            ],
+            fill=colour,
+        )
+        start += band_w + gap
+        index += 1
+
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).ellipse(bbox, fill=255)
+    bands.putalpha(ImageChops.multiply(bands.getchannel("A"), mask))
+    base = Image.alpha_composite(base, bands)
+
+    draw = ImageDraw.Draw(base, "RGBA")
+    # Centre hole.
+    hole = size * 0.042
+    draw.ellipse([cx - hole, cy - hole, cx + hole, cy + hole], fill=rgb("#E6E9F0") + (255,))
+    draw.ellipse([cx - hole, cy - hole, cx + hole, cy + hole],
+                 outline=rgb("#B4BCCC") + (255,), width=max(1, int(size * 0.003)))
+
+    draw_emblem(draw, size, rgb("#FFFFFF"), outline=rgb("#141416"), outline_weight=0.018)
+    return base
+
+
+def render_cassette(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#E8DEC8"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    inset = size * 0.10
+    shell = [inset, inset, size - inset, size - inset]
+    stroke = max(2, int(size * 0.012))
+    draw.rounded_rectangle(shell, radius=size * 0.055, outline=rgb("#2A2118") + (215,), width=stroke)
+
+    # Spools.
+    spool_r = size * 0.070
+    for fx in (0.355, 0.645):
+        sx, sy = size * fx, size * 0.315
+        draw.ellipse([sx - spool_r, sy - spool_r, sx + spool_r, sy + spool_r],
+                     outline=rgb("#2A2118") + (205,), width=max(2, int(size * 0.007)))
+        hub = spool_r * 0.34
+        draw.ellipse([sx - hub, sy - hub, sx + hub, sy + hub], fill=rgb("#2A2118") + (215,))
+
+    # Retro stripe band.
+    band_left = inset + stroke
+    band_right = size - inset - stroke
+    stripes = [
+        (0.455, 0.545, "#E0703A"),
+        (0.545, 0.625, "#8A5A2B"),
+        (0.625, 0.695, "#E8B23A"),
+    ]
+    for top_f, bottom_f, colour in stripes:
+        draw.rectangle(
+            [band_left, size * top_f, band_right, size * bottom_f],
+            fill=rgb(colour) + (255,),
+        )
+
+    draw_emblem(draw, size, rgb("#FFF9EE"), outline=rgb("#2A2118"))
+    return base
+
+
+def render_invincible(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#1D8FE1"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    ink = rgb("#0E1A2A")
+
+    # Halftone field in the top-right corner.
+    step = size * 0.040
+    y = size * 0.055
+    while y < size * 0.40:
+        x = size * 0.60
+        while x < size * 0.95:
+            distance = math.hypot(x - size * 0.93, y - size * 0.07)
+            t = max(0.0, 1.0 - distance / (size * 0.46))
+            radius = size * 0.004 + size * 0.009 * t
+            if radius > 0.5:
+                draw.ellipse([x - radius, y - radius, x + radius, y + radius], fill=ink + (110,))
+            x += step
+        y += step
+
+    # Ink speed lines along the lower-left edge.
+    for offset, length, alpha in [(0.66, 0.24, 90), (0.76, 0.30, 75), (0.87, 0.18, 60)]:
+        x0 = size * 0.075
+        y0 = size * offset
+        draw.line(
+            [(x0, y0), (x0 + size * length, y0 + size * length * 0.26)],
+            fill=ink + (alpha,),
+            width=max(2, int(size * 0.013)),
+        )
+
+    draw_emblem(draw, size, rgb("#FFD43B"), outline=rgb("#10131A"))
+    return base
+
+
+def render_blueprint(size: int) -> Image.Image:
+    base = flat_canvas(size, rgb("#102338"))
+    draw = ImageDraw.Draw(base, "RGBA")
+
+    line = max(1, int(size * 0.0018))
+    step = size / 16.0
+    for i in range(1, 16):
+        draw.line([(i * step, 0), (i * step, size)], fill=(255, 255, 255, 32), width=line)
+        draw.line([(0, i * step), (size, i * step)], fill=(255, 255, 255, 32), width=line)
+
+    # Drawing frame.
+    inset = size * 0.055
+    draw.rectangle([inset, inset, size - inset, size - inset],
+                   outline=(255, 255, 255, 78), width=max(1, int(size * 0.003)))
+
+    # Construction circles.
+    cx = cy = size * 0.5
+    guide = max(1, int(size * 0.0026))
+    for r in (size * 0.300, size * 0.395):
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(255, 255, 255, 58), width=guide)
+
+    # Corner crosshairs.
+    arm = size * 0.045
+    for (ax, ay) in [(inset, inset), (size - inset, inset), (inset, size - inset), (size - inset, size - inset)]:
+        draw.line([(ax - arm, ay), (ax + arm, ay)], fill=(255, 255, 255, 88), width=guide)
+        draw.line([(ax, ay - arm), (ax, ay + arm)], fill=(255, 255, 255, 88), width=guide)
+
+    draw_emblem(draw, size, rgb("#FFFFFF"))
+    return base
+
+
+RENDERERS = {
+    "default": render_default,
+    "editor": render_editor,
+    "orbit": render_orbit,
+    "vinyl": render_vinyl,
+    "cosmos": render_cosmos,
+    "amethyst": render_amethyst,
+    "y2k": render_y2k,
+    "cassette": render_cassette,
+    "invincible": render_invincible,
+    "blueprint": render_blueprint,
+}
+
+
+def render_icon(key: str) -> Image.Image:
+    size = 1024 * SUPERSAMPLE
+    img = RENDERERS[key](size)
+    return img.convert("RGB").resize((1024, 1024), Image.LANCZOS)
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
 
 
 def write_image(img: Image.Image, path: str, pixel_size: int):
@@ -284,6 +571,32 @@ def build_bundle_icons(repo_root: str, set_name: str, base_img: Image.Image):
         write_image(base_img, os.path.join(folder, f"{set_name}{suffix}"), pixels)
 
 
+def prune_stale(assets_root: str, icon_root: str, preview_root: str):
+    """Removes icons and previews that are no longer in the catalogue."""
+    keep_sets = {f"{name}.appiconset" for name, _, _, _ in ICON_SETS}
+    keep_sets.add("AccentColor.colorset")
+    for entry in os.listdir(assets_root):
+        if entry.endswith(".appiconset") and entry not in keep_sets:
+            folder = os.path.join(assets_root, entry)
+            for name in os.listdir(folder):
+                os.remove(os.path.join(folder, name))
+            os.rmdir(folder)
+
+    keep_previews = {preview for _, _, preview, _ in ICON_SETS}
+    for entry in os.listdir(preview_root):
+        if entry.endswith(".png") and entry[:-4] not in keep_previews:
+            os.remove(os.path.join(preview_root, entry))
+
+    keep_bundle = {
+        f"{name}{suffix}"
+        for name, _, _, _ in ICON_SETS
+        for suffix, _ in BUNDLE_ICON_VARIANTS
+    }
+    for entry in os.listdir(icon_root):
+        if entry.endswith(".png") and entry not in keep_bundle:
+            os.remove(os.path.join(icon_root, entry))
+
+
 def ensure_catalog_skeleton(assets_root: str):
     os.makedirs(assets_root, exist_ok=True)
     catalog_contents = os.path.join(assets_root, "Contents.json")
@@ -325,17 +638,21 @@ def main() -> int:
     repo_root = os.path.abspath(args.repo_root)
     assets_root = os.path.join(repo_root, "SparkRPGM", "Resources", "Assets.xcassets")
     preview_root = os.path.join(repo_root, "SparkRPGM", "Resources", "IconPreviews")
+    icon_root = os.path.join(repo_root, "SparkRPGM", "Resources", "IconAssets")
 
     ensure_catalog_skeleton(assets_root)
     os.makedirs(preview_root, exist_ok=True)
+    os.makedirs(icon_root, exist_ok=True)
 
-    for set_name, label, top, bottom, spark, glow, style in ICON_SETS:
-        print(f"Rendering {set_name} ({label}) ...")
-        img = render_icon(top, bottom, spark, glow, style)
+    prune_stale(assets_root, icon_root, preview_root)
+
+    for set_name, title, preview, key in ICON_SETS:
+        print(f"Rendering {set_name} ({title}) ...")
+        img = render_icon(key)
         build_appiconset(assets_root, set_name, img)
         build_bundle_icons(repo_root, set_name, img)
         if not args.skip_previews:
-            write_image(img, os.path.join(preview_root, f"Preview{label}.png"), 1024)
+            write_image(img, os.path.join(preview_root, f"{preview}.png"), 1024)
 
     print(f"Done. Assets: {assets_root}")
     return 0

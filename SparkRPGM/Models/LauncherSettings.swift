@@ -111,6 +111,10 @@ struct LauncherSettings: Codable, Equatable {
     var ambientCoverEnabled: Bool = true
     var ambientCoverIntensity: Double = 0.55
 
+    /// Fills primary actions (import, close) with the accent colour. Turning it
+    /// off keeps those buttons neutral so the accent stays decorative.
+    var highlightPrimaryButtons: Bool = true
+
     /// `nil` = the primary AppIcon.
     var appIconName: String?
 
@@ -128,6 +132,7 @@ struct LauncherSettings: Codable, Equatable {
         case wallpaperVersion
         case ambientCoverEnabled
         case ambientCoverIntensity
+        case highlightPrimaryButtons
         case appIconName
     }
 
@@ -147,8 +152,14 @@ struct LauncherSettings: Codable, Equatable {
         return accentLineColor
     }
 
-    static let accentPresets: [String] = [
-        "#7C5CFF", "#4DA3FF", "#39D9A4", "#FFB23E", "#FF5C8A", "#FF6B4A", "#9B5BFF", "#E8E8F0",
+    static let accentSwatches: [String] = [
+        "#7C5CFF", // purple
+        "#4DA3FF", // periwinkle blue
+        "#39C5FF", // cyan
+        "#39D9A4", // mint green
+        "#FFB23E", // warm yellow
+        "#FF6B4A", // coral orange
+        "#FF5C8A", // pink
     ]
 
     static let linePresets: [String] = [
@@ -183,6 +194,8 @@ extension LauncherSettings {
             ?? fallback.ambientCoverEnabled
         ambientCoverIntensity = try container.decodeIfPresent(Double.self, forKey: .ambientCoverIntensity)
             ?? fallback.ambientCoverIntensity
+        highlightPrimaryButtons = try container.decodeIfPresent(Bool.self, forKey: .highlightPrimaryButtons)
+            ?? fallback.highlightPrimaryButtons
         appIconName = try container.decodeIfPresent(String.self, forKey: .appIconName)
     }
 }
@@ -221,6 +234,7 @@ final class LauncherSettingsStore: ObservableObject {
         updated.accentLineAutoByEngine = LauncherSettings.default.accentLineAutoByEngine
         updated.ambientCoverEnabled = LauncherSettings.default.ambientCoverEnabled
         updated.ambientCoverIntensity = LauncherSettings.default.ambientCoverIntensity
+        updated.highlightPrimaryButtons = LauncherSettings.default.highlightPrimaryButtons
         updated.wallpaperVersion += 1
         settings = updated
         wallpaperRevision += 1
@@ -342,5 +356,35 @@ extension Color {
             Int(round(green * 255)),
             Int(round(blue * 255))
         )
+    }
+
+    /// Hue / saturation / brightness in 0...1, used by the accent sliders.
+    var sparkHSB: (hue: Double, saturation: Double, brightness: Double) {
+        let hsb = UIColor(self).sparkHSB
+        return (Double(hsb.hue), Double(hsb.saturation), Double(hsb.brightness))
+    }
+
+    /// Builds an accent colour from slider-friendly HSB components.
+    static func sparkAccent(hue: Double, saturation: Double, brightness: Double) -> Color {
+        Color(
+            UIColor(
+                hue: CGFloat(min(1, max(0, hue))),
+                saturation: CGFloat(min(1, max(0, saturation))),
+                brightness: CGFloat(min(1, max(0, brightness))),
+                alpha: 1
+            )
+        )
+    }
+}
+
+extension UIColor {
+
+    var sparkHSB: (hue: CGFloat, saturation: CGFloat, brightness: CGFloat) {
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        return (hue, saturation, brightness)
     }
 }

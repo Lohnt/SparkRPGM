@@ -406,9 +406,18 @@ struct LibraryView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
-                .background(accent)
-                .foregroundColor(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .foregroundColor(launcher.settings.highlightPrimaryButtons ? Color.white : SparkTheme.textPrimary)
+                .background(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(launcher.settings.highlightPrimaryButtons ? accent : Color.white.opacity(0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(
+                            launcher.settings.highlightPrimaryButtons ? Color.clear : SparkTheme.hairline,
+                            lineWidth: SparkTheme.hairlineWidth
+                        )
+                )
             }
             .padding(.top, 4)
         }

@@ -61,7 +61,9 @@ jobs:
           rm -rf SparkRPGM/Resources/IconAssets
           python scripts/generate_icons.py --repo-root "$GITHUB_WORKSPACE"
           test -f SparkRPGM/Resources/IconAssets/AppIcon@2x.png
-          test -f SparkRPGM/Resources/IconAssets/IconMidnight-83.5@2x.png
+          test -f SparkRPGM/Resources/IconAssets/IconEditor@2x.png
+          test -f SparkRPGM/Resources/IconAssets/IconY2KDisc-83.5@2x.png
+          test -f SparkRPGM/Resources/IconPreviews/PreviewBlueprint.png
           ls -la SparkRPGM/Resources/IconAssets | head -20
 
       - name: Fetch ogv.js 1.8.9 runtime

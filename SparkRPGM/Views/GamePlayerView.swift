@@ -170,9 +170,18 @@ struct GamePlayerView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 9)
-                    .background(accent)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .foregroundColor(launcher.settings.highlightPrimaryButtons ? Color.white : SparkTheme.textPrimary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(launcher.settings.highlightPrimaryButtons ? accent : Color.white.opacity(0.08))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(
+                                launcher.settings.highlightPrimaryButtons ? Color.clear : SparkTheme.hairline,
+                                lineWidth: SparkTheme.hairlineWidth
+                            )
+                    )
                 }
             }
         }

@@ -1,40 +1,52 @@
 import SwiftUI
 import UIKit
 
+/// Every icon this build ships. The `rawValue` doubles as the
+/// `CFBundleAlternateIcons` key in `Info.plist`, so the two stay in lockstep.
 enum AppIconOption: String, CaseIterable, Identifiable {
-    case primary = "Default"
-    case midnight = "Midnight"
-    case retro = "Retro"
-    case crimson = "Crimson"
-    case neon = "Neon"
-    case minimal = "Minimal"
+    case `default` = "Default"
+    case editor = "Editor"
+    case orbit = "Orbit"
+    case vinyl = "Vinyl"
+    case cosmos = "Cosmos"
+    case amethyst = "Amethyst"
+    case y2kDisc = "Y2K Disc"
+    case cassette = "Cassette"
+    case invincible = "Invincible"
+    case blueprint = "Blueprint"
 
     var id: String { rawValue }
 
-    /// `nil` restores the primary AppIcon.
+    var title: String { rawValue }
+
+    /// `nil` restores the primary `AppIcon`.
     var alternateName: String? {
-        self == .primary ? nil : rawValue
+        self == .default ? nil : rawValue
     }
 
-    var previewName: String { "Preview" + rawValue }
-
-    var subtitle: String {
+    /// 1024px preview shipped in `Resources/IconPreviews`.
+    var previewName: String {
         switch self {
-        case .primary: return "Violet"
-        case .midnight: return "Navy"
-        case .retro: return "Sunset"
-        case .crimson: return "Ember"
-        case .neon: return "Neon"
-        case .minimal: return "Mono"
+        case .default: return "PreviewDefault"
+        case .y2kDisc: return "PreviewY2KDisc"
+        default: return "Preview" + rawValue
         }
     }
 
     static func current() -> AppIconOption {
-        guard let name = UIApplication.shared.alternateIconName else { return .primary }
-        return AppIconOption(rawValue: name) ?? .primary
+        guard let name = UIApplication.shared.alternateIconName else { return .default }
+        return AppIconOption(rawValue: name) ?? .default
+    }
+
+    /// A previously selected icon may no longer exist after an update.
+    static func isKnown(alternateName name: String?) -> Bool {
+        guard let name = name else { return true }
+        return AppIconOption(rawValue: name) != nil
     }
 }
 
+/// Five-column icon grid. Each tile is the squircle preview plus one label, and
+/// the selection outline hugs the preview only.
 struct AppIconPickerView: View {
 
     @EnvironmentObject private var launcher: LauncherSettingsStore
@@ -43,17 +55,16 @@ struct AppIconPickerView: View {
     @State private var errorText: String?
     @State private var isApplying = false
 
-    private let columns = [
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10),
-        GridItem(.flexible(), spacing: 10),
-    ]
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 14),
+        count: 5
+    )
 
     private var accent: Color { launcher.settings.accentColor }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(columns: columns, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
+            LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(AppIconOption.allCases) { option in
                     tile(option)
                 }
@@ -72,9 +83,7 @@ struct AppIconPickerView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .onAppear {
-            selected = AppIconOption.current()
-        }
+        .onAppear(perform: syncSelection)
     }
 
     private func tile(_ option: AppIconOption) -> some View {
@@ -83,35 +92,29 @@ struct AppIconPickerView: View {
         return Button {
             apply(option)
         } label: {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 iconPreview(for: option)
-                    .frame(width: 54, height: 54)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(maxWidth: 56, maxHeight: 56)
+                    .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .padding(3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 15, style: .continuous)
+                            .stroke(
+                                isSelected ? accent : Color.white.opacity(0.08),
+                                lineWidth: 1.5
+                            )
+                    )
 
-                Text(option.rawValue)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isSelected ? SparkTheme.textPrimary : SparkTheme.textSecondary)
+                Text(option.title)
+                    .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                    .foregroundColor(isSelected ? Color.white : Color(hex: "#D1D1D6"))
                     .lineLimit(1)
-
-                Text(option.subtitle)
-                    .font(.system(size: 9))
-                    .foregroundColor(SparkTheme.textTertiary)
-                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(hex: "#1E1E24"))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(
-                        isSelected ? accent.opacity(0.9) : Color.white.opacity(0.08),
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
-            )
             .opacity(isApplying ? 0.6 : 1)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .disabled(isApplying)
@@ -124,14 +127,32 @@ struct AppIconPickerView: View {
                 .resizable()
                 .scaledToFill()
         } else {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(SparkTheme.rowHighlight)
                 .overlay(
-                    Text(option.alternateName?.prefix(1).uppercased() ?? "S")
-                        .font(.system(size: 20, weight: .semibold))
+                    Text(option.title.prefix(1).uppercased())
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundColor(SparkTheme.textTertiary)
                 )
         }
+    }
+
+    private func syncSelection() {
+        guard UIApplication.shared.supportsAlternateIcons else {
+            selected = .default
+            return
+        }
+
+        if !AppIconOption.isKnown(alternateName: UIApplication.shared.alternateIconName) {
+            // The persisted icon was removed from a previous build. Fall back
+            // to the primary icon instead of leaving a dangling name.
+            UIApplication.shared.setAlternateIconName(nil) { _ in }
+            launcher.settings.appIconName = nil
+            selected = .default
+            return
+        }
+
+        selected = AppIconOption.current()
     }
 
     private func apply(_ option: AppIconOption) {

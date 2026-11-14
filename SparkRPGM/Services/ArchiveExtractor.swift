@@ -64,7 +64,28 @@ final class ArchiveExtractor {
     typealias ProgressHandler = (Progress) -> Void
 
     static func detectFormat(for url: URL, fileManager: FileManager = .default) -> ArchiveFormat {
-        switch url.pathExtension.lowercased() {
+        let byExtension = format(forExtension: url.pathExtension)
+        if byExtension != .unknown {
+            return byExtension
+        }
+
+        // Sniff magic bytes as a fallback (Files.app sometimes loses the extension).
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return .unknown }
+        defer { try? handle.close() }
+        let header = (try? handle.read(upToCount: 8)) ?? Data()
+        let bytes = [UInt8](header)
+        if bytes.count >= 4, bytes[0] == 0x50, bytes[1] == 0x4B { return .zip }
+        if bytes.count >= 6, bytes[0] == 0x37, bytes[1] == 0x7A, bytes[2] == 0xBC,
+           bytes[3] == 0xAF, bytes[4] == 0x27, bytes[5] == 0x1C { return .sevenZip }
+        if bytes.count >= 7, bytes[0] == 0x52, bytes[1] == 0x61, bytes[2] == 0x72,
+           bytes[3] == 0x21, bytes[4] == 0x1A, bytes[5] == 0x07 { return .rar }
+        return .unknown
+    }
+
+    /// Case-insensitive extension match shared by the picker and the extractor.
+    /// Uppercase names such as `GAME.ZIP` or `GAME.APK` are common on iPadOS.
+    static func format(forExtension pathExtension: String) -> ArchiveFormat {
+        switch pathExtension.lowercased() {
         case "zip", "apk", "cbz", "ipa":
             return .zip
         case "7z", "cb7":
@@ -72,16 +93,6 @@ final class ArchiveExtractor {
         case "rar", "cbr":
             return .rar
         default:
-            // Sniff magic bytes as a fallback (Files.app sometimes loses the extension).
-            guard let handle = try? FileHandle(forReadingFrom: url) else { return .unknown }
-            defer { try? handle.close() }
-            let header = (try? handle.read(upToCount: 8)) ?? Data()
-            let bytes = [UInt8](header)
-            if bytes.count >= 4, bytes[0] == 0x50, bytes[1] == 0x4B { return .zip }
-            if bytes.count >= 6, bytes[0] == 0x37, bytes[1] == 0x7A, bytes[2] == 0xBC,
-               bytes[3] == 0xAF, bytes[4] == 0x27, bytes[5] == 0x1C { return .sevenZip }
-            if bytes.count >= 7, bytes[0] == 0x52, bytes[1] == 0x61, bytes[2] == 0x72,
-               bytes[3] == 0x21, bytes[4] == 0x1A, bytes[5] == 0x07 { return .rar }
             return .unknown
         }
     }

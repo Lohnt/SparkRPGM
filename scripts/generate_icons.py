@@ -551,16 +551,18 @@ def build_appiconset(assets_root: str, set_name: str, base_img: Image.Image):
 # the bundle is far more reliable on iOS 15 / TrollStore than relying on the
 # asset catalog, where a missing compiled slot surfaces as OSStatus -54.
 BUNDLE_ICON_VARIANTS = [
-    (".png", 1024),          # fallback / marketing
-    ("@2x.png", 120),        # iPhone
-    ("@3x.png", 180),        # iPhone
-    ("-76.png", 76),         # iPad
-    ("-76@2x.png", 152),     # iPad
-    ("-83.5.png", 167),      # iPad Pro
-    ("-83.5@2x.png", 167),   # iPad Pro
-    ("~ipad.png", 76),       # device-specific aliases
-    ("~ipad@2x.png", 152),
-    ("~ipad@3x.png", 167),
+    (".png", 1024),                  # fallback / marketing
+    ("@2x.png", 120),                # iPhone
+    ("@3x.png", 180),                # iPhone
+    ("~ipad.png", 76),               # iPad idiom aliases
+    ("@2x~ipad.png", 152),
+    ("@3x~ipad.png", 167),
+    ("-76.png", 76),                 # iPad
+    ("-76@2x.png", 152),
+    ("-76@2x~ipad.png", 152),
+    ("-83.5.png", 167),              # iPad Pro
+    ("-83.5@2x.png", 167),
+    ("-83.5@2x~ipad.png", 167),
 ]
 
 

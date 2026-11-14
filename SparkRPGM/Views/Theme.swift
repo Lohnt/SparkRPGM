@@ -5,7 +5,7 @@ import UIKit
 ///
 /// The launcher is a dark utility surface: a matte charcoal canvas, slightly
 /// raised neutral panels, hairline separators and crisp SF text. Colour is
-/// deliberately scarce — the player's accent is reserved for selection,
+/// deliberately scarce: the player's accent is reserved for selection,
 /// controls and the per-game line colour.
 enum SparkTheme {
 
@@ -35,6 +35,82 @@ enum SparkTheme {
 
 // MARK: - Panels
 
+/// Background for panels, cards and rows.
+///
+/// Flat mode is a matte fill. Liquid Glass mode layers an iOS 15 material, a
+/// translucent tint of the requested fill and a top sheen, so text stays crisp
+/// while the wallpaper reads through the surface.
+struct SparkSurfaceBackground: View {
+
+    @EnvironmentObject private var launcher: LauncherSettingsStore
+
+    var cornerRadius: CGFloat = 12
+    var fill: Color = SparkTheme.panel
+
+    private var intensity: Double {
+        min(1, max(0, launcher.settings.liquidGlassIntensity))
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        ZStack {
+            if launcher.settings.liquidGlassEnabled {
+                shape.fill(.ultraThinMaterial)
+                shape.fill(fill.opacity(0.30 + 0.42 * intensity))
+                shape.fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.10 * intensity),
+                            Color.clear,
+                        ],
+                        startPoint: .top,
+                        endPoint: .center
+                    )
+                )
+            } else {
+                shape.fill(fill)
+            }
+        }
+    }
+}
+
+/// Hairline in flat mode, specular top-edge highlight in Liquid Glass mode.
+struct SparkSurfaceBorder: View {
+
+    @EnvironmentObject private var launcher: LauncherSettingsStore
+
+    var cornerRadius: CGFloat = 12
+    var borderOpacity: Double = 0.08
+
+    private var intensity: Double {
+        min(1, max(0, launcher.settings.liquidGlassIntensity))
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+
+        if launcher.settings.liquidGlassEnabled {
+            shape.strokeBorder(
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.24 * intensity),
+                        Color.white.opacity(0.06),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 0.5
+            )
+        } else {
+            shape.strokeBorder(
+                Color.white.opacity(borderOpacity),
+                lineWidth: SparkTheme.hairlineWidth
+            )
+        }
+    }
+}
+
 struct SparkPanelModifier: ViewModifier {
 
     var cornerRadius: CGFloat = 12
@@ -44,17 +120,37 @@ struct SparkPanelModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(fill)
+                SparkSurfaceBackground(cornerRadius: cornerRadius, fill: fill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(borderOpacity), lineWidth: SparkTheme.hairlineWidth)
+                SparkSurfaceBorder(cornerRadius: cornerRadius, borderOpacity: borderOpacity)
+                    .allowsHitTesting(false)
             )
     }
 }
 
 extension View {
+
+    /// Surface fill only. Pair with `sparkBorder` when the content must stay
+    /// above the border, as cover cards do.
+    func sparkSurface(
+        cornerRadius: CGFloat = 12,
+        fill: Color = SparkTheme.panel
+    ) -> some View {
+        background(SparkSurfaceBackground(cornerRadius: cornerRadius, fill: fill))
+    }
+
+    /// Border only, so callers that draw their own fill still pick up the
+    /// specular highlight.
+    func sparkBorder(
+        cornerRadius: CGFloat = 12,
+        borderOpacity: Double = 0.08
+    ) -> some View {
+        overlay(
+            SparkSurfaceBorder(cornerRadius: cornerRadius, borderOpacity: borderOpacity)
+                .allowsHitTesting(false)
+        )
+    }
 
     /// Neutral elevated surface used by sections, rows and banners.
     func sparkPanel(

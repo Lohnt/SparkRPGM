@@ -33,6 +33,34 @@ enum AppIconOption: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Loose PNGs iOS resolves for `CFBundleIconFiles`. They must sit at the
+    /// root of `SparkRPGM.app`, never in an `IconAssets` subfolder.
+    var bundleFileNames: [String] {
+        guard let name = alternateName else { return [] }
+        return [
+            "\(name).png",
+            "\(name)@2x.png",
+            "\(name)@3x.png",
+            "\(name)~ipad.png",
+            "\(name)@2x~ipad.png",
+            "\(name)-76.png",
+            "\(name)-76@2x.png",
+            "\(name)-83.5.png",
+            "\(name)-83.5@2x.png",
+            "\(name)-83.5@2x~ipad.png",
+        ]
+    }
+
+    /// Any icon files this build failed to copy into the bundle root.
+    static func missingBundleFiles(for option: AppIconOption) -> [String] {
+        option.bundleFileNames.filter { file in
+            let nsName = file as NSString
+            let resource = nsName.deletingPathExtension
+            let ext = nsName.pathExtension
+            return Bundle.main.url(forResource: resource, withExtension: ext) == nil
+        }
+    }
+
     static func current() -> AppIconOption {
         guard let name = UIApplication.shared.alternateIconName else { return .default }
         return AppIconOption(rawValue: name) ?? .default
@@ -152,13 +180,25 @@ struct AppIconPickerView: View {
             return
         }
 
-        selected = AppIconOption.current()
+        let option = AppIconOption.current()
+        selected = option
+
+        let missing = AppIconOption.missingBundleFiles(for: option)
+        if !missing.isEmpty {
+            errorText = "This build is missing \(missing.joined(separator: ", ")) from the app bundle root. Reinstall SparkRPGM, then choose the icon again."
+        }
     }
 
     private func apply(_ option: AppIconOption) {
         guard option != selected, !isApplying else { return }
         guard UIApplication.shared.supportsAlternateIcons else {
             errorText = "This build does not bundle alternate icons."
+            return
+        }
+
+        let missing = AppIconOption.missingBundleFiles(for: option)
+        guard missing.isEmpty else {
+            errorText = "This build is missing \(missing.joined(separator: ", ")) from the app bundle root. iOS cannot switch to an icon it cannot find, so the icon files must be copied flat into SparkRPGM.app."
             return
         }
 

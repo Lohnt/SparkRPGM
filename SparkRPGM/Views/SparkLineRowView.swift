@@ -54,14 +54,8 @@ struct SparkLineRowView: View {
         }
         .padding(.trailing, 15)
         .frame(minHeight: 64)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(SparkTheme.panel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
-        )
+        .sparkSurface(cornerRadius: 10, fill: SparkTheme.panel)
+        .sparkBorder(cornerRadius: 10)
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture(perform: onOpen)
         .contextMenu {

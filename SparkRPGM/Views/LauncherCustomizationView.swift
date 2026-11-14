@@ -367,6 +367,30 @@ struct LauncherCustomizationView: View {
                 }
             }
 
+            group("LIQUID GLASS") {
+                sparkToggle(
+                    "Liquid Glass",
+                    subtitle: "Translucent glass panels with specular top-edge highlights",
+                    isOn: binding(\.liquidGlassEnabled)
+                )
+
+                SparkSlider(
+                    title: "Glass Intensity",
+                    valueText: "\(Int((launcher.settings.liquidGlassIntensity * 100).rounded()))%",
+                    value: binding(\.liquidGlassIntensity),
+                    range: 0...1,
+                    bottomLabels: ["Subtle", "Balanced", "Frosted"]
+                ) {
+                    LinearGradient(
+                        colors: [Color(hex: "#1C1C21"), Color.white.opacity(0.55)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                }
+                .opacity(launcher.settings.liquidGlassEnabled ? 1 : 0.4)
+                .disabled(!launcher.settings.liquidGlassEnabled)
+            }
+
             group("BACKGROUND") {
                 SparkSlider(
                     title: "Background Dim",
@@ -899,19 +923,23 @@ struct LauncherCustomizationView: View {
     private func presentWallpaperFile() {
         DocumentPickerPresenter.shared.present(
             contentTypes: DocumentPickerTypes.images,
-            allowsMultipleSelection: false
-        ) { documents in
-            guard let document = documents.first else { return }
-            isSavingWallpaper = true
+            allowsMultipleSelection: false,
+            onPicked: { documents in
+                guard let document = documents.first else { return }
+                isSavingWallpaper = true
 
-            DispatchQueue.global(qos: .userInitiated).async {
-                let data = try? Data(contentsOf: document.url, options: .mappedIfSafe)
-                let image = data.flatMap { UIImage(data: $0) }
-                DispatchQueue.main.async {
-                    applyWallpaper(image)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let data = try? Data(contentsOf: document.url, options: .mappedIfSafe)
+                    let image = data.flatMap { UIImage(data: $0) }
+                    DispatchQueue.main.async {
+                        applyWallpaper(image)
+                    }
                 }
+            },
+            onFailure: { message in
+                errorText = message
             }
-        }
+        )
     }
 
     private func applyWallpaper(_ image: UIImage?) {

@@ -44,7 +44,7 @@ struct CoverImageView: View {
 
     private var fallback: some View {
         ZStack {
-            SparkTheme.panelRaised
+            SparkSurfaceBackground(cornerRadius: 0, fill: SparkTheme.panelRaised)
 
             VStack(spacing: 8) {
                 Image(systemName: "square.stack")
@@ -145,10 +145,7 @@ struct GameCardView: View {
         .aspectRatio(cardSize.coverAspect, contentMode: .fit)
         .background(SparkTheme.panelRaised)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
-        )
+        .sparkBorder(cornerRadius: cornerRadius)
         .overlay(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(lineColor)

@@ -540,11 +540,15 @@ struct LibraryView: View {
     private func presentArchivePicker() {
         DocumentPickerPresenter.shared.present(
             contentTypes: DocumentPickerTypes.archives,
-            allowsMultipleSelection: true
-        ) { documents in
-            guard !documents.isEmpty else { return }
-            coordinator.enqueue(documents: documents)
-        }
+            allowsMultipleSelection: true,
+            onPicked: { documents in
+                guard !documents.isEmpty else { return }
+                coordinator.enqueue(documents: documents)
+            },
+            onFailure: { message in
+                presentError(message, title: "Import failed")
+            }
+        )
     }
 
     private func presentPhotoCover() {
@@ -563,19 +567,23 @@ struct LibraryView: View {
         guard let target = coverTarget else { return }
         DocumentPickerPresenter.shared.present(
             contentTypes: DocumentPickerTypes.images,
-            allowsMultipleSelection: false
-        ) { documents in
-            guard let document = documents.first,
-                  let data = try? Data(contentsOf: document.url),
-                  let image = UIImage(data: data) else {
-                return
+            allowsMultipleSelection: false,
+            onPicked: { documents in
+                guard let document = documents.first,
+                      let data = try? Data(contentsOf: document.url),
+                      let image = UIImage(data: data) else {
+                    return
+                }
+                do {
+                    try store.setCustomCover(image, for: target)
+                } catch {
+                    presentError(error.localizedDescription)
+                }
+            },
+            onFailure: { message in
+                presentError(message, title: "Cover")
             }
-            do {
-                try store.setCustomCover(image, for: target)
-            } catch {
-                presentError(error.localizedDescription)
-            }
-        }
+        )
     }
 
     // MARK: - Chrome

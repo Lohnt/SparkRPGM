@@ -59,12 +59,41 @@ targets:
           - "Info.plist"
           - "Resources/WebRuntime"
           - "Resources/JS"
+          - "Resources/IconAssets"
           - "**/.DS_Store"
       - path: SparkRPGM/Resources/JS
         buildPhase: resources
       - path: SparkRPGM/Resources/WebRuntime
         type: folder
         buildPhase: resources
+    postBuildScripts:
+      - name: Flatten alternate app icons into the bundle root
+        shell: /bin/bash
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          SRC="$SRCROOT/SparkRPGM/Resources/IconAssets"
+          DEST="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          if [ ! -d "$SRC" ]; then
+            echo "error: $SRC is missing. Run scripts/generate_icons.py before building."
+            exit 1
+          fi
+          mkdir -p "$DEST"
+          copied=0
+          for icon in "$SRC"/*.png; do
+            [ -e "$icon" ] || continue
+            cp -f "$icon" "$DEST/$(basename "$icon")"
+            copied=$((copied + 1))
+          done
+          if [ "$copied" -lt 10 ]; then
+            echo "error: expected at least 10 icon PNGs in $SRC, copied $copied."
+            exit 1
+          fi
+          # CFBundleIconFiles resolves these from the .app root, never from a
+          # nested folder, which is what caused OSStatus error -54.
+          test -f "$DEST/IconEditor@2x.png"
+          test -f "$DEST/IconOrbit-83.5@2x~ipad.png"
+          echo "Flattened $copied alternate icon PNGs into $DEST"
     dependencies:
       - package: ZIPFoundation
         product: ZIPFoundation

@@ -49,13 +49,17 @@ final class ImportCoordinator: ObservableObject {
 
         var added = false
         for document in documents {
-            let path = document.url.standardizedFileURL.path
+            let path = document.originalURL.standardizedFileURL.path
             guard !activeURLs.contains(path) else { continue }
             activeURLs.insert(path)
             queue.append(document)
             added = true
         }
-        guard added else { return }
+        guard added else {
+            let name = documents.first?.fileName ?? "That file"
+            store.toast("\(name) is already importing")
+            return
+        }
 
         isShowingProgress = true
         processNext()
@@ -111,15 +115,16 @@ final class ImportCoordinator: ObservableObject {
 
         isProcessing = true
         let document = queue.removeFirst()
-        let url = document.url
+        let queuedPath = document.originalURL.standardizedFileURL.path
+        let fileName = document.fileName
         let jobID = UUID()
         let token = ImportCancellationToken()
         cancellationTokens[jobID] = token
 
         let job = ImportJob(
             id: jobID,
-            fileName: url.lastPathComponent,
-            statusText: "Preparing…",
+            fileName: fileName,
+            statusText: "Selected \(fileName)…",
             fraction: 0
         )
         jobs.append(job)
@@ -131,7 +136,10 @@ final class ImportCoordinator: ObservableObject {
             // security scope claimed by the picker never drops mid-job.
             let result: Result<ImportResult, Error>
             do {
-                let imported = try self.importer.importItem(at: document.url, token: token) { fraction, status in
+                // Resolves provider-hosted files into a readable local URL
+                // before the extractor touches them.
+                let readableURL = try document.prepare()
+                let imported = try self.importer.importItem(at: readableURL, token: token) { fraction, status in
                     DispatchQueue.main.async {
                         self.update(jobID: jobID) { job in
                             job.fraction = fraction
@@ -145,14 +153,14 @@ final class ImportCoordinator: ObservableObject {
             }
 
             DispatchQueue.main.async {
-                self.activeURLs.remove(url.standardizedFileURL.path)
+                self.activeURLs.remove(queuedPath)
                 self.cancellationTokens.removeValue(forKey: jobID)
 
                 switch result {
                 case .success(let imported):
                     self.update(jobID: jobID) { job in
                         job.fraction = 1
-                        job.statusText = "Ready — \(imported.engine.displayName)"
+                        job.statusText = "Imported \(imported.title)"
                         job.isFinished = true
                     }
                     self.store.toast("Imported \(imported.title)")

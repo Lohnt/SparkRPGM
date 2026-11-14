@@ -50,7 +50,7 @@ final class ArchiveImporter {
         try fileManager.createDirectory(at: stagingRoot, withIntermediateDirectories: true, attributes: nil)
         try fileManager.createDirectory(at: extraction, withIntermediateDirectories: true, attributes: nil)
 
-        progress(0.02, "Preparing \(archiveURL.lastPathComponent)…")
+        progress(0.02, "Extracting \(archiveURL.lastPathComponent)…")
 
         try ArchiveExtractor.extract(
             archiveURL: archiveURL,

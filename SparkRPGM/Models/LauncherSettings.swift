@@ -111,6 +111,10 @@ struct LauncherSettings: Codable, Equatable {
     var ambientCoverEnabled: Bool = true
     var ambientCoverIntensity: Double = 0.55
 
+    /// Renders panels and rows as translucent glass with a specular top edge.
+    var liquidGlassEnabled: Bool = false
+    var liquidGlassIntensity: Double = 0.55
+
     /// Fills primary actions (import, close) with the accent colour. Turning it
     /// off keeps those buttons neutral so the accent stays decorative.
     var highlightPrimaryButtons: Bool = true
@@ -132,6 +136,8 @@ struct LauncherSettings: Codable, Equatable {
         case wallpaperVersion
         case ambientCoverEnabled
         case ambientCoverIntensity
+        case liquidGlassEnabled
+        case liquidGlassIntensity
         case highlightPrimaryButtons
         case appIconName
     }
@@ -194,6 +200,10 @@ extension LauncherSettings {
             ?? fallback.ambientCoverEnabled
         ambientCoverIntensity = try container.decodeIfPresent(Double.self, forKey: .ambientCoverIntensity)
             ?? fallback.ambientCoverIntensity
+        liquidGlassEnabled = try container.decodeIfPresent(Bool.self, forKey: .liquidGlassEnabled)
+            ?? fallback.liquidGlassEnabled
+        liquidGlassIntensity = try container.decodeIfPresent(Double.self, forKey: .liquidGlassIntensity)
+            ?? fallback.liquidGlassIntensity
         highlightPrimaryButtons = try container.decodeIfPresent(Bool.self, forKey: .highlightPrimaryButtons)
             ?? fallback.highlightPrimaryButtons
         appIconName = try container.decodeIfPresent(String.self, forKey: .appIconName)
@@ -234,6 +244,8 @@ final class LauncherSettingsStore: ObservableObject {
         updated.accentLineAutoByEngine = LauncherSettings.default.accentLineAutoByEngine
         updated.ambientCoverEnabled = LauncherSettings.default.ambientCoverEnabled
         updated.ambientCoverIntensity = LauncherSettings.default.ambientCoverIntensity
+        updated.liquidGlassEnabled = LauncherSettings.default.liquidGlassEnabled
+        updated.liquidGlassIntensity = LauncherSettings.default.liquidGlassIntensity
         updated.highlightPrimaryButtons = LauncherSettings.default.highlightPrimaryButtons
         updated.wallpaperVersion += 1
         settings = updated

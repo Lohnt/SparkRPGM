@@ -1,43 +1,80 @@
 # SparkRPGM
 
-A Spark‑style RPG Maker player for iOS and iPadOS 15+. Import a game from
-Files.app, play it full‑screen with on‑screen controls, and keep your saves in a
-folder you can see and back up.
+An RPG Maker player for iOS and iPadOS 15+, packaged as an unsigned `.ipa` for TrollStore.
 
-Built to run on a 3 GB iPad (iPadOS 15.6.1) and shipped as an unsigned `.ipa`
-for TrollStore.
+The name, clean line-list layout, and visible `games/` + `save/` folder setup are inspired by **Spark - Ren'Py Novels** on iOS. Full transparency: this project was **vibecoded** to get RPG Maker games running smoothly on a 3 GB RAM iPad (iPadOS 15.6.1) with customizable on-screen controls and saves you can actually see and back up in Files.app.
 
 ---
 
-## What it plays
+## Supported Engines
 
 | Engine | Runtime | Notes |
 | --- | --- | --- |
-| RPG Maker MZ / MV | bundled `WKWebView` runtime | plays the game's own `index.html` |
-| RPG Maker 2000 / 2003 | EasyRPG Player (WebAssembly) | fetched into the bundle by CI |
-| RPG Maker XP / VX / VX Ace | optional `mkxp` module | shows an explainer card when mkxp is not compiled in |
-| Any HTML5 build | `WKWebView` | `index.html` + assets |
+| RPG Maker MZ / MV | Bundled `WKWebView` runtime | Runs the game's own `index.html` |
+| RPG Maker 2000 / 2003 | EasyRPG Player (WebAssembly) | Fetched into the bundle by GitHub Actions |
+| RPG Maker XP / VX / VX Ace | Optional `mkxp` module | Shows a status card if `mkxp` isn't compiled in |
+| Plain HTML5 games | `WKWebView` | Any `index.html` + assets folder |
 
-Archives accepted by **+ Import Game**: `.zip`, `.apk`, `.7z`, `.rar`
-(also `.cbz`, `.cb7`, `.cbr`, `.ipa`). Nested layouts are handled, including
-APK `assets/www/` wrappers, `www/` folders and single‑directory archives.
+**+ Import Game** accepts `.zip`, `.apk`, `.7z`, and `.rar` (plus `.cbz`, `.cb7`, `.cbr`, `.ipa`). Nested folders—like APK `assets/www/` wrappers, `www/` subfolders, or single-root archives—are flattened automatically on import.
 
-## Build
+## Install (TrollStore)
 
-The only supported build path is the GitHub Actions workflow
-(`.github/workflows/build-ipa.yml`), which runs on `macos-latest` and produces
-an **unsigned** `SparkRPGM.ipa` artifact:
+1. Grab `SparkRPGM.ipa` from the latest **Actions** workflow run artifacts.
+2. Share/open it in **TrollStore** (or TrollStore Lite) and tap Install.
+3. Launch SparkRPGM (you can swap home-screen icons anytime under **Paintbrush → App Icon**).
 
-1. installs XcodeGen and Pillow, generates the app icons;
-2. downloads ogv.js `1.8.9` into `Resources/WebRuntime/ogv`;
-3. clones `torahappy/easyrpg-web` with Git LFS into `Resources/WebRuntime/easyrpg`
-   (the build still succeeds if that step fails — EasyRPG titles then show a
-   runtime warning);
-4. runs `xcodegen generate`;
-5. builds Release with `CODE_SIGNING_ALLOWED=NO`;
-6. wraps `Payload/SparkRPGM.app` into `SparkRPGM.ipa`.
+## Folder Structure (`Files.app`)
 
-To build locally (macOS with Xcode 15+):
+Everything lives in `On My iPad / SparkRPGM`:
+
+```text
+games/<Game Title>/          Extracted game files
+save/<Game Title>/           Save files (file1.rpgsave, Save01.lsd, etc.)
+backups/                     Zipped save backups from the long-press menu
+theme/wallpaper.jpg          Custom launcher wallpaper
+chocofilepickerfixfolder/    Keeps the Files.app folder visible when empty
+README.txt                   Quick in-app guide
+```
+
+You can either import archives through the **+** button or drop already-extracted game folders straight into `games/` and pull down to refresh the library. Internal metadata (covers, playtime, accent colors, and nw.js file overlays) lives in `.spark/`.
+
+## Library & Launcher Customization
+
+Switch between two layouts anytime from the top bar or the **Paintbrush** menu:
+
+- **Spark Lines** — Fast, text-first rows inspired by Spark Ren'Py, with a `4 pt` colored accent stripe on the left, engine badge, disk size, playtime, and last-played date (`Played today`, `Played 3d ago`, etc.).
+- **Prism Icons** — Multi-column cover grid (Compact / Standard / Large) with custom artwork or an engine badge fallback.
+
+Long-press any game to **Rename**, **Set/Remove Custom Cover**, **Change Line Color**, **Backup Saves**, or **Delete**. Foreground playtime is tracked automatically and saved to `.spark/metadata.json`.
+
+Inside **Paintbrush**, you can customize:
+- Wallpaper (from Photos or Files), background blur (`0–30`), and dim overlay (`0–85%`)
+- Card glass opacity, grid card size, and editable header title
+- Accent colors and left-line colors (presets, full `ColorPicker`, or **Auto-color by engine**)
+- Alternate app icons (`Default`, `Midnight`, `Retro`, `Crimson`, `Neon`, `Minimal`)
+
+## In-Game Controls & Speed
+
+The touch overlay maps directly to standard RPG Maker keyCodes (`D-Pad`, `Z / Enter`, `X / Escape`, `Shift`, and `Ctrl / Skip`).
+
+- **Top Pill Bar:** Back, **1× / 2× / 3×** game speed toggle, orientation lock (`Landscape` / `Portrait` / `Auto`), reload, **Customize Controls**, and hide UI.
+- **Fast-Forward (`1×–3×`):** Accelerates `SceneManager.updateScene` on MV/MZ (keeping BGM pitch normal) and `requestAnimationFrame` ticks on EasyRPG/HTML5 without needing a reload.
+- **Control Editor:** Drag to reposition the D-Pad and action buttons, scale them (`0.6×–1.8×`), adjust opacity, toggle 8-way diagonals, haptics, or mirror the layout—saved globally or per game.
+
+## Under the Hood (3 GB iPad Notes)
+
+- **Custom `rpgm://` Scheme Handler:** Avoids `file://` CORS issues, resolves Windows-style case-insensitive asset paths on case-sensitive APFS storage, and streams large `.webm`/audio files via `206 Partial Content` in `256 KB` chunks so WebKit doesn't blow past memory limits.
+- **Audio & Saves:** Configured with `AVAudioSession` `.playback` so the iPad mute switch doesn't kill BGM, with `ogv.js` fallback for `.ogg`/`.webm` playback. Saves bridge directly to `Documents/save/<Game Title>/`.
+- **Memory Caps:** `devicePixelRatio` is capped at `1.5`, cover thumbnails are downsampled via ImageIO into a `48 MB` `NSCache`, and EasyRPG blocks games over `1.4 GB` / `40,000` files before loading into WebAssembly memory.
+
+## Building
+
+Builds run automatically on `macos-latest` via `.github/workflows/build-ipa.yml` on every push to `main`:
+1. Generates app icons with Pillow (`scripts/generate_icons.py`).
+2. Fetches `ogv.js 1.8.9` and `torahappy/easyrpg-web` into `Resources/WebRuntime/`.
+3. Generates the Xcode project with `xcodegen generate` and compiles an unsigned Release `.ipa`.
+
+To build locally on macOS (Xcode 15+):
 
 ```bash
 brew install xcodegen
@@ -47,166 +84,8 @@ xcodegen generate
 open SparkRPGM.xcodeproj
 ```
 
-Set your own team and bundle identifier if you want to install it directly from
-Xcode.
+## Credits & License
 
-## Install (TrollStore)
-
-1. Download `SparkRPGM.ipa` from the workflow run artifacts.
-2. Open it with TrollStore (or TrollStore Lite) and confirm the install.
-3. Launch SparkRPGM.
-
-Alternate home‑screen icons are switched from **Paintbrush → App Icon**.
-
-## Folders (Files.app)
-
-`On My iPad / SparkRPGM`:
-
-```
-games/<Game Title>/          extracted game root
-save/<Game Title>/           physical save files (file1.rpgsave, Save01.lsd, …)
-backups/                     save archives created from a game's long-press menu
-chocofilepickerfixfolder/    keeps the Files.app directory index alive
-theme/wallpaper.jpg          launcher wallpaper
-README.txt                   short in-app help
-```
-
-Drop an archive anywhere in this folder and import it, or copy an already
-extracted game into `games/` and pull down to rescan the library.
-
-Hidden scaffolding lives in `.spark/` (`metadata.json` with titles, covers,
-playtime and line colours; custom covers; the nw.js write overlay) and
-`.staging/` (temporary extraction space).
-
-## Library
-
-Two library styles, switchable from the top bar or from **Paintbrush**:
-
-* **Spark Lines** — a fast, text‑first list with no cover art. Every row has a
-  4 pt coloured accent line, the title, an engine badge, disk size and play
-  time.
-* **Prism Icons** — a multi‑column cover grid (Compact / Standard / Large
-  cards) with artwork or an engine fallback badge.
-
-Both styles show `size • playtime` (for example `4.2 GB • 3h 20m`, or
-`4.2 GB • Unplayed`) plus a relative hint such as `Played today` or
-`Played yesterday`. Search and engine filter chips, plus sorting by name,
-recently played, most played or size.
-
-Long‑press a game for **Rename**, **Set Custom Cover**, **Remove Custom Cover**,
-**Change Line Color**, **Backup Saves** and **Delete**. Pull down to rescan
-`Documents/games`.
-
-### Playtime
-
-Foreground session time is accumulated while a game is open (paused whenever
-the app leaves the foreground) and flushed to `Documents/.spark/metadata.json`
-every 45 seconds, on pause and on exit.
-
-### Accent line colours
-
-The launcher‑wide line colour supports presets, a full `ColorPicker`, or
-**Auto-colour by engine** (MV blue, MZ green, 2000 gold, XP purple…). Any single
-game can override it from its long‑press menu → **Change Line Color**; the
-override is stored as `accentColorHex` in the game's metadata.
-
-## Launcher customization
-
-**Paintbrush** opens the appearance panel:
-
-* library style (Spark Lines / Prism Icons) and sort order;
-* wallpaper from Photos or Files, background blur (0–30), dim overlay (0–85 %);
-* card glass opacity, card size (Compact / Standard / Large);
-* editable header title, 8 accent presets plus a full `ColorPicker`;
-* accent line presets, custom colour and auto‑colour‑by‑engine;
-* app icon switcher (Default / Midnight / Retro / Crimson / Neon / Minimal);
-* one‑tap reset.
-
-Everything is stored in `UserDefaults` under `sparkrpgm.launcher.settings.v1`
-and survives launches.
-
-## In‑game controls
-
-The translucent overlay maps to the keyCodes RPG Maker listens for:
-
-| Control | keyCode |
-| --- | --- |
-| D‑Pad | 38 / 40 / 37 / 39 |
-| Z / OK | 90 (+ Enter 13) |
-| X / Cancel | 88 (+ Escape 27) |
-| Shift | 16 |
-| Ctrl / Skip | 17 |
-
-The top pill bar has back, game speed (1× → 2× → 3× → 1×), orientation
-(Landscape / Portrait / Auto), reload, **Customize Controls** and hide‑chrome.
-Tapping **Show** brings the chrome back.
-
-The speed button calls `window.__sparkSetSpeed(multiplier)`:
-RPG Maker MV/MZ tick `SceneManager.updateScene` 2–3 times per rendered frame,
-while EasyRPG and plain HTML5 repeat the `requestAnimationFrame` loop (extra
-loop re‑registrations are dropped, so exactly one loop stays alive). 1× restores
-normal speed without a reload.
-
-**Customize Controls** lets you drag the D‑Pad and the action cluster, resize
-them (0.6×–1.8×), change opacity (10–100 %), enable auto‑fade, 8‑way input,
-haptics, mirroring, and show/hide Shift and Ctrl. Presses are dispatched through
-`window.__sparkKey(type, code, keyCode, button)`, which forces `keyCode`/`which`
-on a real `KeyboardEvent` and updates `Input._currentState` before dispatching.
-
-Layouts are saved per game or globally (`sparkrpgm.controls.game.v1.<folder>`
-and `sparkrpgm.controls.global.v1`).
-
-## How games are served
-
-Games are served to `WKWebView` through a custom `rpgm://game/<folder>/…`
-scheme handler rather than `file://`:
-
-* case‑insensitive path resolution (Windows‑authored games reference
-  `IMG/Pictures/Foo.PNG` on a case‑sensitive APFS volume);
-* `206 Partial Content` streaming in 256 KB chunks for audio and video, so a
-  large `.webm` never becomes a single `Data`;
-* explicit MIME types (`application/wasm`, JavaScript, fonts …);
-* bundled runtimes (ogv.js, EasyRPG) are served from the same scheme and host
-  under `__runtime__/`, keeping workers and `.wasm` fetches same‑origin.
-
-Audio uses `AVAudioSession` `.playback` + `.mixWithOthers`, so the iPad's
-mute switch does not silence BGM.
-
-Saves are written through a native bridge straight into
-`Documents/save/<Game Title>/`. MV's synchronous `StorageManager` reads saves
-that were pre‑loaded before the engine booted; MZ's Promise‑based
-`StorageManager` talks to the bridge directly. `.ogg`/`.webm` assets fall back to
-ogv.js, and `decodeAudioData` failures degrade to silence instead of crashing a
-scene.
-
-## Memory notes (3 GB iPad)
-
-* `devicePixelRatio` is capped at 1.5 and `webglcontextlost` is reported to the
-  app instead of silently blanking.
-* Covers and wallpapers are thumbnailed with ImageIO and cached in a 48 MB
-  `NSCache`.
-* Archives stream to disk; 7‑Zip inputs are memory‑mapped; RAR entries are
-  extracted and released one at a time.
-* The EasyRPG host refuses games larger than 1.4 GB / 40 000 files before
-  copying them into the wasm filesystem.
-
-## Layout
-
-```
-SparkRPGM/
-  App/          app entry, paths, logging, audio session, orientation
-  Models/       Game, GameEngine, GameStore, launcher + control settings
-  Services/     archive import, detection, thumbnails, backups
-  Views/        library, player, controls, customizer, pickers
-  Web/          scheme handler, web context, EasyRPG host builder
-  Resources/    assets, JS shims, fetched web runtimes
-scripts/generate_icons.py
-project.yml
-```
-
-## License
-
-No license file is included yet; treat the sources as personal-use reference
-until one is added. RPG Maker is a trademark of Gotcha Gotcha Games /
-Enterbrain. EasyRPG Player, ogv.js, ZIPFoundation, SWCompression and Unrar.swift
-keep their own licenses.
+- Inspired by **Spark - Ren'Py Novels** (iOS).
+- Powered by **EasyRPG Player**, **ogv.js**, **ZIPFoundation**, **SWCompression**, and **Unrar.swift**, each governed by their own open-source licenses.
+- RPG Maker is a trademark of Gotcha Gotcha Games / Enterbrain. No formal license file is included in this repo yet—feel free to use or adapt it for personal projects.

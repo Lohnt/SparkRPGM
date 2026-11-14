@@ -64,9 +64,15 @@ extension View {
     ) -> some View {
         modifier(SparkPanelModifier(cornerRadius: cornerRadius, fill: fill, borderOpacity: borderOpacity))
     }
+}
+
+extension Text {
 
     /// Uppercase caption used above grouped controls.
-    func sparkSectionLabel() -> some View {
+    ///
+    /// Declared on `Text` because `View.tracking(_:)` is iOS 16+, while
+    /// `Text.tracking(_:)` has shipped since iOS 13.
+    func sparkSectionLabel() -> Text {
         self
             .font(.system(size: 11, weight: .semibold))
             .tracking(1.1)

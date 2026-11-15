@@ -24,6 +24,8 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var isLoading = true
     @Published private(set) var loadError: String?
     @Published private(set) var contextLost = false
+    /// Active boot step reported live by spark-bootstrap.
+    @Published private(set) var bootStage: String?
     /// Last JavaScript exception or failed script reported by the bootstrap.
     @Published private(set) var bootDiagnostic: String?
     /// Files the scheme handler could not resolve, newest last (capped).
@@ -100,6 +102,7 @@ final class GameSession: NSObject, ObservableObject {
         controller.add(bridge, name: "sparkLog")
         controller.add(bridge, name: "sparkReady")
         controller.add(bridge, name: "gameReady")
+        controller.add(bridge, name: "bootStage")
         controller.add(bridge, name: "sparkError")
         controller.add(bridge, name: "sparkContextLost")
         controller.add(bridge, name: "saveBridge")
@@ -375,11 +378,31 @@ final class GameSession: NSObject, ObservableObject {
             guard Date().timeIntervalSince(lastReadyAt) > 0.3 else { return }
             lastReadyAt = Date()
             markGameReady()
+            markLoaded()
             if let hasEngine = payload?["hasEngine"] as? Bool,
                hasEngine == false,
                bootDiagnostic == nil,
                game.engine == .rpgMakerMZ || game.engine == .rpgMakerMV {
                 bootDiagnostic = Self.missingEngineNotice
+            }
+
+        case "bootStage":
+            if let dict = message.body as? [String: Any] {
+                let stage = dict["stage"] as? String ?? ""
+                if !stage.isEmpty {
+                    self.bootStage = stage
+                }
+                let isFinished = dict["isFinished"] as? Bool ?? false
+                if isFinished || stage.contains("Title screen") || stage.contains("Scene_Title") {
+                    markGameReady()
+                    markLoaded()
+                }
+            } else if let stage = message.body as? String, !stage.isEmpty {
+                self.bootStage = stage
+                if stage.contains("Title screen") || stage.contains("Scene_Title") {
+                    markGameReady()
+                    markLoaded()
+                }
             }
 
         case "sparkError":
@@ -443,6 +466,9 @@ final class GameSession: NSObject, ObservableObject {
 
         let folder = AppPaths.ensureSaveFolder(forGame: game.folderName)
         let fileURL = folder.appendingPathComponent(fileName)
+        let sparkFolder = game.rootURL.appendingPathComponent(".spark/saves", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sparkFolder, withIntermediateDirectories: true, attributes: nil)
+        let sparkFileURL = sparkFolder.appendingPathComponent(fileName)
         let fileManager = FileManager.default
 
         switch action {
@@ -461,21 +487,25 @@ final class GameSession: NSObject, ObservableObject {
             }
             do {
                 try bytes.write(to: fileURL, options: .atomic)
+                try? bytes.write(to: sparkFileURL, options: .atomic)
             } catch {
                 Log.error("Save write failed for \(fileName)", error: error)
             }
 
         case "read":
-            guard let bytes = try? Data(contentsOf: fileURL) else { return }
-            respond(saveData: bytes.base64EncodedString(), name: fileName, webView: webView)
+            let bytes = (try? Data(contentsOf: fileURL)) ?? (try? Data(contentsOf: sparkFileURL))
+            guard let payloadBytes = bytes else { return }
+            respond(saveData: payloadBytes.base64EncodedString(), name: fileName, webView: webView)
 
         case "remove", "delete":
             try? fileManager.removeItem(at: fileURL)
+            try? fileManager.removeItem(at: sparkFileURL)
 
         case "list":
-            let names = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
-            let payload = names.filter { !$0.hasPrefix(".") }
-            respond(saveNames: payload, webView: webView)
+            let docNames = (try? fileManager.contentsOfDirectory(atPath: folder.path)) ?? []
+            let sparkNames = (try? fileManager.contentsOfDirectory(atPath: sparkFolder.path)) ?? []
+            let allNames = Set(docNames + sparkNames).filter { !$0.hasPrefix(".") }
+            respond(saveNames: Array(allNames), webView: webView)
 
         default:
             break

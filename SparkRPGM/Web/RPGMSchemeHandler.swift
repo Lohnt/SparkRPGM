@@ -232,6 +232,19 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
             relative += "/index.html"
         }
 
+        if relative.hasPrefix("save/") || relative.hasPrefix(".spark/saves/") {
+            let fileName = (relative as NSString).lastPathComponent
+            let saveDir = AppPaths.saveFolder(forGame: gameRoot.lastPathComponent)
+            let fileInSave = saveDir.appendingPathComponent(fileName)
+            if FileManager.default.fileExists(atPath: fileInSave.path) {
+                return fileInSave
+            }
+            let sparkSave = gameRoot.appendingPathComponent(".spark/saves/\(fileName)")
+            if FileManager.default.fileExists(atPath: sparkSave.path) {
+                return sparkSave
+            }
+        }
+
         if let url = resolveRelative(relative) {
             return url
         }

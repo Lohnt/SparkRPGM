@@ -159,7 +159,7 @@ struct GamePlayerView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 30)
 
-                Text(game.engine.isEasyRPG ? "Starting EasyRPG Player" : "Starting \(game.engine.displayName)")
+                Text(session.bootStage ?? (game.engine.isEasyRPG ? "Starting EasyRPG Player" : "Starting \(game.engine.displayName)"))
                     .font(.system(size: 11))
                     .foregroundColor(SparkTheme.textSecondary)
 

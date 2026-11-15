@@ -318,12 +318,12 @@
 
   function readBlob(name) {
     if (bytesCache[name]) {
-      return Promise.resolve(new Blob([bytesCache[name]]));
+      return Promise.resolve(bytesCache[name]);
     }
     return new Promise(function (resolve) {
       requestRead(name, function (bytes) {
         if (!bytes) { resolve(null); return; }
-        resolve(new Blob([bytes]));
+        resolve(bytes);
       });
     });
   }

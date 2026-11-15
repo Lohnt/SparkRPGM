@@ -37,12 +37,12 @@ enum SparkTheme {
 
 /// Native iOS 15 blur behind every Liquid Glass surface.
 ///
-/// Wraps UIKit's `UIVisualEffectView` with `.systemThinMaterialDark` so the
+/// Wraps UIKit's `UIVisualEffectView` with `.systemUltraThinMaterialDark` so the
 /// underlying wallpaper and ambient cover art visibly shine and refract through
 /// every panel while keeping foreground text legible.
 struct VisualEffectBlur: UIViewRepresentable {
 
-    var style: UIBlurEffect.Style = .systemThinMaterialDark
+    var style: UIBlurEffect.Style = .systemUltraThinMaterialDark
 
     func makeUIView(context: Context) -> UIVisualEffectView {
         let view = UIVisualEffectView(effect: UIBlurEffect(style: style))
@@ -61,9 +61,9 @@ struct VisualEffectBlur: UIViewRepresentable {
 /// Background for panels, cards and rows.
 ///
 /// Flat mode is a matte fill. Liquid Glass mode layers a real
-/// `UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))` blur,
-/// a very faint translucent white tint (at most 0.04 * intensity) to let colors
-/// refract without flat grey murkiness, and a subtle glossy gradient over the top 28%.
+/// `UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))` blur,
+/// a multi-layer cool-neutral glass body gradient (`0.09 * intensity` top-left to `0.02 * intensity` bottom-right)
+/// so cards separate crisply from dark wallpapers without turning flat grey, and a subtle glossy top sheen.
 struct SparkSurfaceBackground: View {
 
     @EnvironmentObject private var launcher: LauncherSettingsStore
@@ -80,11 +80,19 @@ struct SparkSurfaceBackground: View {
 
         ZStack {
             if launcher.settings.liquidGlassEnabled {
-                VisualEffectBlur(style: .systemThinMaterialDark)
+                VisualEffectBlur(style: .systemUltraThinMaterialDark)
                     .clipShape(shape)
 
-                // Translucent refraction layer instead of heavy dark #16161C
-                shape.fill(Color.white.opacity(0.04 * intensity))
+                // Multi-Layer Glass Depth: subtle cool-neutral glass body gradient
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.09 * intensity),
+                        Color.white.opacity(0.02 * intensity),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(shape)
 
                 // Subtle top glossy gradient over the top 28% of the panel
                 LinearGradient(
@@ -109,7 +117,7 @@ struct SparkSurfaceBackground: View {
     }
 }
 
-/// Hairline in flat mode, directional specular rim border and inner inset highlight in Liquid Glass.
+/// Hairline in flat mode, directional specular rim border, soft top highlight arc, and inner inset rim in Liquid Glass.
 struct SparkSurfaceBorder: View {
 
     @EnvironmentObject private var launcher: LauncherSettingsStore
@@ -126,13 +134,13 @@ struct SparkSurfaceBorder: View {
 
         if launcher.settings.liquidGlassEnabled {
             ZStack {
-                // Outer 1pt directional specular rim border (top-left to bottom-right)
+                // 1pt outer border gradient: 0.65 top-left -> 0.14 center -> 0.35 bottom-right
                 shape.strokeBorder(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.50 * intensity),
-                            Color.white.opacity(0.12),
-                            Color.white.opacity(0.28 * intensity),
+                            Color.white.opacity(0.65 * intensity),
+                            Color.white.opacity(0.14 * intensity),
+                            Color.white.opacity(0.35 * intensity),
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -140,20 +148,26 @@ struct SparkSurfaceBorder: View {
                     lineWidth: 1
                 )
 
-                // Inner 0.5pt inset highlight
+                // Soft top highlight arc for genuine beveled glass edge
+                shape.strokeBorder(
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.white.opacity(0.30 * intensity), location: 0.0),
+                            .init(color: Color.clear, location: 0.28),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+
+                // Inner 0.5pt inset rim
                 RoundedRectangle(
                     cornerRadius: max(0, cornerRadius - 0.5),
                     style: .continuous
                 )
                 .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.28 * intensity),
-                            Color.white.opacity(0.04 * intensity),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
+                    Color.white.opacity(0.18 * intensity),
                     lineWidth: 0.5
                 )
                 .padding(0.5)
@@ -166,6 +180,8 @@ struct SparkSurfaceBorder: View {
         }
     }
 }
+
+typealias LiquidGlassModifier = SparkPanelModifier
 
 struct SparkPanelModifier: ViewModifier {
 
@@ -215,6 +231,15 @@ extension View {
         borderOpacity: Double = 0.08
     ) -> some View {
         modifier(SparkPanelModifier(cornerRadius: cornerRadius, fill: fill, borderOpacity: borderOpacity))
+    }
+
+    /// Explicit Liquid Glass modifier alias for sparkPanel.
+    func liquidGlass(
+        cornerRadius: CGFloat = 12,
+        fill: Color = SparkTheme.panel,
+        borderOpacity: Double = 0.08
+    ) -> some View {
+        modifier(LiquidGlassModifier(cornerRadius: cornerRadius, fill: fill, borderOpacity: borderOpacity))
     }
 }
 

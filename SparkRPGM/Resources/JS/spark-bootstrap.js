@@ -908,45 +908,158 @@
   function patchDataManagerInstance(dm) {
     if (!dm || (typeof dm !== 'object' && typeof dm !== 'function')) return;
     try {
-      if (dm.__sparkPatched) return;
-      dm.__sparkPatched = true;
+      if (!dm.__sparkErrorPatched) {
+        dm.__sparkErrorPatched = true;
 
-      // Wrap onXhrError (MZ)
-      var origOnXhrError = dm.onXhrError;
-      dm.onXhrError = function (name, src, url) {
-        var failedUrl = url || ('data/' + src);
-        report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
-          dataName: name,
-          src: src
-        });
-        if (origOnXhrError) {
-          return origOnXhrError.apply(this, arguments);
-        }
-      };
-
-      // Wrap onError (MV)
-      var origOnError = dm.onError;
-      dm.onError = function (name, src) {
-        var failedUrl = 'data/' + src;
-        report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
-          dataName: name,
-          src: src
-        });
-        if (origOnError) {
-          try {
-            return origOnError.apply(this, arguments);
-          } catch (e) {
-            var msg = e && e.message ? e.message : String(e);
-            if (msg.indexOf('Your browser does not allow to read local files') !== -1) {
-              throw new Error('Failed to load: ' + failedUrl);
-            }
-            throw e;
+        // Wrap onXhrError (MZ)
+        var origOnXhrError = dm.onXhrError;
+        dm.onXhrError = function (name, src, url) {
+          var failedUrl = url || ('data/' + src);
+          report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
+            dataName: name,
+            src: src
+          });
+          if (origOnXhrError) {
+            return origOnXhrError.apply(this, arguments);
           }
-        } else {
-          throw new Error('Failed to load: ' + failedUrl);
+        };
+
+        // Wrap onError (MV)
+        var origOnError = dm.onError;
+        dm.onError = function (name, src) {
+          var failedUrl = 'data/' + src;
+          report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
+            dataName: name,
+            src: src
+          });
+          if (origOnError) {
+            try {
+              return origOnError.apply(this, arguments);
+            } catch (e) {
+              var msg = e && e.message ? e.message : String(e);
+              if (msg.indexOf('Your browser does not allow to read local files') !== -1) {
+                throw new Error('Failed to load: ' + failedUrl);
+              }
+              throw e;
+            }
+          } else {
+            throw new Error('Failed to load: ' + failedUrl);
+          }
+        };
+      }
+
+      wrapDataManagerGlobalInfo(dm);
+    } catch (e) {}
+  }
+
+  // MARK: - Late StorageManager & DataManager.loadGlobalInfo Wrappers
+
+  function wrapStorageMethod(sm, methodName) {
+    if (!sm) return;
+    var current = sm[methodName];
+    if (typeof current !== 'function' || current.__sparkLateWrapped) return;
+
+    var wrapped = function (saveName) {
+      var self = this;
+      var nameStr = String(saveName || '');
+
+      // Whenever StorageManager.exists(saveName) is false, reject immediately
+      try {
+        if (typeof self.exists === 'function') {
+          var ex = self.exists(saveName);
+          if (ex === false) {
+            return Promise.reject(new Error("Save not found: " + nameStr));
+          }
+        }
+      } catch (e) {}
+
+      var p;
+      try {
+        p = current.apply(self, arguments);
+      } catch (err) {
+        return Promise.reject(err);
+      }
+
+      return Promise.resolve(p).then(function (val) {
+        if (val === null || val === undefined || (typeof val === 'string' && val === '')) {
+          return Promise.reject(new Error("Save not found: " + nameStr));
+        }
+        return val;
+      });
+    };
+
+    wrapped.__sparkLateWrapped = true;
+    sm[methodName] = wrapped;
+  }
+
+  function wrapDataManagerGlobalInfo(dm) {
+    if (!dm) return;
+    var current = dm.loadGlobalInfo;
+    if (typeof current === 'function' && !current.__sparkLateWrapped) {
+      var wrapped = function () {
+        var self = this;
+        var timer = setTimeout(function () {
+          if (!self._globalInfo) {
+            report('info', 'DataManager.loadGlobalInfo timed out (1000ms); initialized _globalInfo = []', '', 0);
+            self._globalInfo = [];
+          }
+        }, 1000);
+
+        try {
+          var result = current.apply(self, arguments);
+          if (result && typeof result.then === 'function') {
+            result.then(function () {
+              clearTimeout(timer);
+              if (!self._globalInfo) self._globalInfo = [];
+            }, function () {
+              clearTimeout(timer);
+              if (!self._globalInfo) self._globalInfo = [];
+            });
+          }
+          return result;
+        } catch (e) {
+          clearTimeout(timer);
+          report('info', 'DataManager.loadGlobalInfo threw synchronously; initialized _globalInfo = []', '', 0);
+          self._globalInfo = [];
         }
       };
-    } catch (e) {}
+
+      wrapped.__sparkLateWrapped = true;
+      dm.loadGlobalInfo = wrapped;
+    }
+
+    if (typeof dm.isGlobalInfoLoaded === 'function' && !dm.isGlobalInfoLoaded.__sparkLateWrapped) {
+      var origIsLoaded = dm.isGlobalInfoLoaded;
+      var wrappedIsLoaded = function () {
+        try {
+          var res = origIsLoaded.apply(this, arguments);
+          if (res) return true;
+        } catch (e) {}
+        return !!this._globalInfo;
+      };
+      wrappedIsLoaded.__sparkLateWrapped = true;
+      dm.isGlobalInfoLoaded = wrappedIsLoaded;
+    }
+  }
+
+  function reapplyStorageAndDataManagerPatches() {
+    var sm = window.StorageManager;
+    if (sm) {
+      if (typeof window.__sparkPatchStorageManager === 'function') {
+        window.__sparkPatchStorageManager(sm);
+      }
+      wrapStorageMethod(sm, 'loadFromForage');
+      wrapStorageMethod(sm, 'loadZip');
+      wrapStorageMethod(sm, 'loadObject');
+    }
+
+    var dm = window.DataManager;
+    if (dm) {
+      if (typeof patchDataManagerInstance === 'function') {
+        patchDataManagerInstance(dm);
+      }
+      wrapDataManagerGlobalInfo(dm);
+    }
   }
 
   if (typeof window.DataManager !== 'undefined') {
@@ -979,30 +1092,43 @@
     patchGraphicsInstance(window.Graphics);
   }
 
-  // SceneManager: catchNormalError and catchException reporting
+  // SceneManager: run hook, catchNormalError, and catchException reporting
   function patchSceneManagerInstance(sm) {
     if (!sm || (typeof sm !== 'object' && typeof sm !== 'function')) return;
     try {
-      if (sm.__sparkPatched) return;
-      sm.__sparkPatched = true;
+      if (typeof sm.run === 'function' && !sm.run.__sparkRunHooked) {
+        var origRun = sm.run;
+        var wrappedRun = function (sceneClass) {
+          try {
+            reapplyStorageAndDataManagerPatches();
+          } catch (e) {}
+          return origRun.apply(this, arguments);
+        };
+        wrappedRun.__sparkRunHooked = true;
+        sm.run = wrappedRun;
+      }
 
-      var origCatchNormalError = sm.catchNormalError;
-      sm.catchNormalError = function (e) {
-        var formatted = formatError(e);
-        report('engine.error', formatted, '', 0);
-        if (origCatchNormalError) {
-          return origCatchNormalError.apply(this, arguments);
-        }
-      };
+      if (!sm.__sparkErrorPatched) {
+        sm.__sparkErrorPatched = true;
 
-      var origCatchException = sm.catchException;
-      sm.catchException = function (e) {
-        var formatted = formatError(e);
-        report('engine.error', formatted, '', 0);
-        if (origCatchException) {
-          return origCatchException.apply(this, arguments);
-        }
-      };
+        var origCatchNormalError = sm.catchNormalError;
+        sm.catchNormalError = function (e) {
+          var formatted = formatError(e);
+          report('engine.error', formatted, '', 0);
+          if (origCatchNormalError) {
+            return origCatchNormalError.apply(this, arguments);
+          }
+        };
+
+        var origCatchException = sm.catchException;
+        sm.catchException = function (e) {
+          var formatted = formatError(e);
+          report('engine.error', formatted, '', 0);
+          if (origCatchException) {
+            return origCatchException.apply(this, arguments);
+          }
+        };
+      }
     } catch (e) {}
   }
 
@@ -1146,6 +1272,9 @@
     if (window.StorageManager && window.__sparkPatchStorageManager) {
       window.__sparkPatchStorageManager(window.StorageManager);
     }
+    if (window.StorageManager || window.DataManager) {
+      reapplyStorageAndDataManagerPatches();
+    }
     if (window.Video) hookVideo(window.Video);
     if (window.FontManager) hookFontManager(window.FontManager);
     if (enginePollAttempts >= 600) {
@@ -1234,6 +1363,36 @@
     var scene = (sm && (sm._scene || sm._nextScene)) || null;
     var sceneName = (scene && scene.constructor && scene.constructor.name) || 'Scene_Boot';
 
+    var dm = window.DataManager;
+    var dbBool = false;
+    var giBool = false;
+    var dbLoaded = 'n/a';
+    var giLoaded = 'n/a';
+    if (dm) {
+      try {
+        if (typeof dm.isDatabaseLoaded === 'function') {
+          dbBool = dm.isDatabaseLoaded();
+          dbLoaded = String(dbBool);
+        }
+      } catch (e) { dbLoaded = 'err'; }
+      try {
+        if (typeof dm.isGlobalInfoLoaded === 'function') {
+          giBool = dm.isGlobalInfoLoaded();
+          giLoaded = String(giBool);
+        }
+      } catch (e) { giLoaded = 'err'; }
+    }
+
+    // Watchdog Safety Recovery:
+    // In the readiness watchdog, if Scene_Boot is active with DB === true and GlobalInfo === false,
+    // automatically set DataManager._globalInfo = DataManager._globalInfo || [] so the game immediately proceeds to Scene_Title instead of hanging.
+    if (sceneName === 'Scene_Boot' && dbBool === true && giBool === false && dm) {
+      report('info', 'Watchdog safety recovery: setting DataManager._globalInfo = [] for Scene_Boot', '', 0);
+      dm._globalInfo = dm._globalInfo || [];
+      giBool = true;
+      giLoaded = 'true (recovered)';
+    }
+
     var isSceneReady = true;
     if (scene && typeof scene.isReady === 'function') {
       try {
@@ -1260,20 +1419,11 @@
     }
 
     if (now - stallStartTime >= 2500) {
-      var dbLoaded = 'n/a';
-      var giLoaded = 'n/a';
-      var dm = window.DataManager;
-      if (dm) {
-        try {
-          if (typeof dm.isDatabaseLoaded === 'function') {
-            dbLoaded = String(dm.isDatabaseLoaded());
-          }
-        } catch (e) { dbLoaded = 'err'; }
-        try {
-          if (typeof dm.isGlobalInfoLoaded === 'function') {
-            giLoaded = String(dm.isGlobalInfoLoaded());
-          }
-        } catch (e) { giLoaded = 'err'; }
+      if (sceneName === 'Scene_Boot' && dbBool === true && (!dm || !dm.isGlobalInfoLoaded || !dm.isGlobalInfoLoaded())) {
+        if (dm) {
+          dm._globalInfo = dm._globalInfo || [];
+          giLoaded = 'true (recovered)';
+        }
       }
 
       var unreadyBitmaps = [];
@@ -1365,13 +1515,16 @@
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
+      reapplyStorageAndDataManagerPatches();
       reportStage('DOM ready');
     }, false);
   } else {
+    reapplyStorageAndDataManagerPatches();
     reportStage('DOM ready');
   }
 
   window.addEventListener('load', function () {
+    reapplyStorageAndDataManagerPatches();
     reportStage('main.js loaded');
   }, false);
 
@@ -1383,6 +1536,7 @@
       if (typeof patchSceneManagerInstance === 'function') {
         patchSceneManagerInstance(sm);
       }
+      reapplyStorageAndDataManagerPatches();
       var currentScene = sm._scene || sm._nextScene;
       if (currentScene) {
         var name = (currentScene.constructor && currentScene.constructor.name) || '';

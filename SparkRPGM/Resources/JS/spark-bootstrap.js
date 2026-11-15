@@ -182,33 +182,128 @@
     }
     if (target.__sparkIsSafeProxy) return target;
 
+    var ignoredKeys = {
+      'toJSON': true,
+      'then': true,
+      'prototype': true,
+      'constructor': true,
+      'valueOf': true,
+      'inspect': true,
+      'toString': true
+    };
+
     var handler = {
-      get: function (obj, prop) {
+      get: function (obj, prop, receiver) {
         if (prop === '__sparkIsSafeProxy') return true;
-        if (typeof prop === 'symbol') return obj[prop];
-        if (prop in obj) {
-          var val = obj[prop];
-          if (val && typeof val === 'object' && !val.__sparkIsSafeProxy && !Array.isArray(val)) {
-            val = makeSafeVisuMZProxy(val);
-            obj[prop] = val;
-          }
-          return val;
+        if (typeof prop === 'symbol') {
+          return Reflect.get(obj, prop, receiver);
         }
-        // Auto-initialize uninitialized namespace on VisuMZ as a safe proxy
-        var sub = makeSafeVisuMZProxy({});
-        obj[prop] = sub;
-        return sub;
+        var propStr = String(prop);
+        if (ignoredKeys[propStr] || propStr.charAt(0) === '@' || propStr.charAt(0) === '_') {
+          return Reflect.get(obj, prop, receiver);
+        }
+        if (prop in obj) {
+          return obj[prop];
+        }
+        // Missing top-level namespace: assign and return a plain {} object (finite, non-recursive)
+        var plain = {};
+        obj[prop] = plain;
+        return plain;
       }
     };
 
     try {
       var p = new Proxy(target, handler);
-      p.__sparkIsSafeProxy = true;
+      target.__sparkIsSafeProxy = true;
       return p;
     } catch (e) {
       return target;
     }
   }
+
+  // MARK: - JsonEx Cycle Guard & Safe Depth Fallback
+
+  function patchJsonExInstance(jsonEx) {
+    if (!jsonEx || typeof jsonEx._encode !== 'function' || jsonEx._encode.__sparkWrapped) return;
+    var origEncode = jsonEx._encode;
+
+    jsonEx._encode = function (value, circular, depth) {
+      depth = depth || 0;
+      var max = (typeof jsonEx.maxDepth === 'number' && jsonEx.maxDepth > 0) ? jsonEx.maxDepth : 100;
+      if (depth >= max) {
+        return null; // Safe depth fallback instead of throwing "Object too deep"
+      }
+
+      if (!circular) circular = [];
+
+      if (value && typeof value === 'object' && value !== null) {
+        if (!circular.__sparkSeen) {
+          try { circular.__sparkSeen = new WeakSet(); } catch (err) {}
+        }
+        if (circular.__sparkSeen) {
+          if (circular.__sparkSeen.has(value)) {
+            var cName = (typeof jsonEx._getConstructorName === 'function') ? jsonEx._getConstructorName(value) : '';
+            var idx = circular.indexOf(value);
+            return { "@": cName, "@c": idx !== -1 ? idx : 0 };
+          }
+          try { circular.__sparkSeen.add(value); } catch (err) {}
+        } else if (circular.indexOf(value) !== -1) {
+          var cName2 = (typeof jsonEx._getConstructorName === 'function') ? jsonEx._getConstructorName(value) : '';
+          return { "@": cName2, "@c": circular.indexOf(value) };
+        }
+      }
+
+      try {
+        return origEncode.call(this, value, circular, depth);
+      } catch (e) {
+        var msg = e && e.message ? String(e.message) : '';
+        if (msg.indexOf('too deep') !== -1 || e instanceof RangeError) {
+          return null; // Return null on depth/stack overflow instead of throwing
+        }
+        throw e;
+      }
+    };
+    jsonEx._encode.__sparkWrapped = true;
+
+    if (typeof jsonEx.makeDeepCopy === 'function' && !jsonEx.makeDeepCopy.__sparkWrapped) {
+      var origDeepCopy = jsonEx.makeDeepCopy;
+      jsonEx.makeDeepCopy = function (object) {
+        try {
+          return origDeepCopy.apply(this, arguments);
+        } catch (e) {
+          var msg = e && e.message ? String(e.message) : '';
+          if (msg.indexOf('too deep') !== -1 || e instanceof RangeError) {
+            if (Array.isArray(object)) return object.slice();
+            if (object && typeof object === 'object') {
+              var copy = {};
+              for (var k in object) {
+                if (Object.prototype.hasOwnProperty.call(object, k)) copy[k] = object[k];
+              }
+              return copy;
+            }
+          }
+          throw e;
+        }
+      };
+      jsonEx.makeDeepCopy.__sparkWrapped = true;
+    }
+  }
+
+  var rawJsonEx = window.JsonEx;
+  if (rawJsonEx) patchJsonExInstance(rawJsonEx);
+  try {
+    Object.defineProperty(window, 'JsonEx', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawJsonEx;
+      },
+      set: function (val) {
+        rawJsonEx = val;
+        patchJsonExInstance(val);
+      }
+    });
+  } catch (e) {}
 
   var rawVisuMZ = window.VisuMZ;
   var visuMZProxy = rawVisuMZ ? makeSafeVisuMZProxy(rawVisuMZ) : null;
@@ -317,7 +412,7 @@
         return origInit.apply(this, arguments);
       } catch (e) {
         var formatted = formatError(e);
-        report('plugin.warning', 'Game_System.initialize recovered: ' + formatted, '', 0);
+        report('info', 'Game_System.initialize recovered: ' + formatted, '', 0);
         try {
           if (window.console && window.console.warn) {
             window.console.warn('[SparkBoot] Game_System.initialize caught error:', formatted);
@@ -1168,7 +1263,32 @@
 
       wrapDataManagerGlobalInfo(dm);
       wrapDataManagerCreateGameObjects(dm);
+      wrapDataManagerSetupNewGame(dm);
     } catch (e) {}
+  }
+
+  function wrapDataManagerSetupNewGame(dm) {
+    if (!dm || typeof dm.setupNewGame !== 'function' || dm.setupNewGame.__sparkWrapped) return;
+    var origSetupNewGame = dm.setupNewGame;
+    dm.setupNewGame = function () {
+      origSetupNewGame.apply(this, arguments);
+      // Ensure starting map is reserved if $gamePlayer did not reserve it
+      try {
+        if (window.$gamePlayer && window.$dataSystem) {
+          var mapId = (typeof window.$gamePlayer.newMapId === 'function') ? window.$gamePlayer.newMapId() : 0;
+          if (mapId <= 0 && window.$dataSystem.startMapId > 0) {
+            window.$gamePlayer.reserveTransfer(
+              window.$dataSystem.startMapId,
+              window.$dataSystem.startX || 0,
+              window.$dataSystem.startY || 0,
+              2,
+              0
+            );
+          }
+        }
+      } catch (e) {}
+    };
+    dm.setupNewGame.__sparkWrapped = true;
   }
 
   function wrapDataManagerCreateGameObjects(dm) {
@@ -1295,8 +1415,12 @@
       }
       wrapDataManagerGlobalInfo(dm);
       wrapDataManagerCreateGameObjects(dm);
+      wrapDataManagerSetupNewGame(dm);
     }
 
+    if (window.JsonEx) {
+      patchJsonExInstance(window.JsonEx);
+    }
     if (window.PluginManager) {
       patchPluginManager(window.PluginManager);
     }
@@ -1837,6 +1961,14 @@
       lines.push('Scene: ' + sceneName);
       lines.push('LoadingCount: ' + loadingCount);
       lines.push('DB / GlobalInfo: DB=' + dbLoaded + ', GlobalInfo=' + giLoaded);
+
+      if (sceneName === 'Scene_Map' || (window.Scene_Map && scene instanceof window.Scene_Map)) {
+        var mapLoaded = (dm && typeof dm.isMapLoaded === 'function') ? dm.isMapLoaded() : false;
+        var mapId = (window.$gameMap && typeof window.$gameMap.mapId === 'function') ? window.$gameMap.mapId() : 0;
+        var padMapId = ('000' + mapId).slice(-3);
+        var mapUrl = 'data/Map' + padMapId + '.json';
+        lines.push('Map State: mapId=' + mapId + ' (' + mapUrl + '), isMapLoaded=' + mapLoaded);
+      }
 
       var fontVideo = 'FontManager.isReady()=' + fmReadyStr;
       if (unreadyFonts.length > 0) {

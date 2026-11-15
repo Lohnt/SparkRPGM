@@ -141,7 +141,7 @@ struct GamePlayerView: View {
                     showsContinue: true
                 )
                 .zIndex(22)
-            } else if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !session.isLoading, diagnostic != GameSession.slowBootNotice {
+            } else if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !session.isLoading, isFatalErrorDiagnostic(diagnostic) {
                 errorOverlay(
                     message: diagnostic,
                     detail: diagnosticDetail,
@@ -167,7 +167,7 @@ struct GamePlayerView: View {
                     .zIndex(8)
             }
 
-            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, !session.isLoading, diagnostic == GameSession.slowBootNotice {
+            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, !session.isLoading, !isFatalErrorDiagnostic(diagnostic) {
                 errorBanner(diagnostic)
                     .zIndex(15)
             }
@@ -212,6 +212,17 @@ struct GamePlayerView: View {
 
     private var gameFailed: Bool {
         session.loadError != nil || session.didStall
+    }
+
+    private func isFatalErrorDiagnostic(_ message: String) -> Bool {
+        let lower = message.lowercased()
+        if lower.contains("recovered:") || lower.contains("warning:") || lower.contains("timed out (1000ms); initialized _globalinfo = []") {
+            return false
+        }
+        if message == GameSession.slowBootNotice || message == GameSession.missingEngineNotice {
+            return false
+        }
+        return true
     }
 
     private var diagnosticDetail: String? {

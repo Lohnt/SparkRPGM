@@ -88,6 +88,31 @@
 
   window.__sparkReportStage = reportStage;
 
+  // MARK: - Error Formatting Helper (JavaScriptCore stack fix)
+
+  function formatError(err) {
+    if (!err) return 'Unknown error';
+    if (Array.isArray(err) && err[0] === 'LoadError') {
+      return 'Failed to load: ' + err[1];
+    }
+    if (err instanceof Error || (typeof err === 'object' && err !== null && (err.name || err.message))) {
+      var name = err.name || 'Error';
+      var message = err.message || '';
+      var title = name + (message ? ': ' + message : '');
+      var stack = err.stack ? String(err.stack) : '';
+      if (stack) {
+        // JavaScriptCore on iOS omits the error name and message from stack.
+        // Prepend "name: message" if not already present at the start.
+        if (stack.indexOf(title) !== 0 && stack.indexOf(message) === -1) {
+          return title + '\n' + stack;
+        }
+        return stack;
+      }
+      return title;
+    }
+    return String(err);
+  }
+
   // MARK: - Console & Exception Logging
 
   var originalConsoleError = window.console ? window.console.error : null;
@@ -96,7 +121,9 @@
       try {
         var args = Array.prototype.slice.call(arguments);
         var msg = args.map(function (a) {
-          if (a instanceof Error) return a.stack || a.message;
+          if (a instanceof Error || (typeof a === 'object' && a !== null && (a.name || a.message))) {
+            return formatError(a);
+          }
           if (typeof a === 'object' && a !== null) {
             try { return JSON.stringify(a); } catch (e) { return String(a); }
           }
@@ -123,7 +150,8 @@
         return;
       }
 
-      var message = (event && event.message) ? event.message : 'Unknown script error';
+      var errorObj = event && event.error;
+      var message = errorObj ? formatError(errorObj) : ((event && event.message) ? event.message : 'Unknown script error');
       var source = (event && event.filename) ? event.filename : '';
       var line = (event && event.lineno) ? event.lineno : 0;
       var column = (event && event.colno) ? event.colno : 0;
@@ -131,19 +159,31 @@
     } catch (error) {}
   }, true);
 
+  var origWindowOnError = window.onerror;
+  window.onerror = function (message, source, lineno, colno, error) {
+    try {
+      var fullMsg = error ? formatError(error) : (message || 'Unknown script error');
+      report('script', fullMsg, source || '', lineno || 0, { column: colno || 0 });
+    } catch (e) {}
+    if (typeof origWindowOnError === 'function') {
+      return origWindowOnError.apply(window, arguments);
+    }
+    return false;
+  };
+
   window.addEventListener('unhandledrejection', function (event) {
     try {
       var reason = event && event.reason;
       var message = 'Unhandled promise rejection';
       var source = '';
       if (reason) {
-        if (typeof reason === 'string') {
-          message = reason;
-        } else if (reason.message) {
-          message = reason.message;
+        if (reason instanceof Error || (typeof reason === 'object' && reason !== null && (reason.name || reason.message))) {
+          message = formatError(reason);
           source = reason.fileName || reason.sourceURL || '';
+        } else if (typeof reason === 'string') {
+          message = reason;
         } else {
-          message = String(reason);
+          try { message = JSON.stringify(reason); } catch (e) { message = String(reason); }
         }
       }
       report('promise', message, source, 0);
@@ -208,6 +248,9 @@
       configurable: true,
       enumerable: true,
       get: function () {
+        if (typeof this._sparkCustomStatus !== 'undefined') {
+          return this._sparkCustomStatus;
+        }
         var rawStatus = 0;
         try {
           if (originalStatusDesc && originalStatusDesc.get) {
@@ -238,6 +281,9 @@
           if (hasContent) return 200;
         }
         return rawStatus;
+      },
+      set: function (val) {
+        this._sparkCustomStatus = val;
       }
     });
 
@@ -245,6 +291,9 @@
       configurable: true,
       enumerable: true,
       get: function () {
+        if (typeof this._sparkCustomStatusText !== 'undefined') {
+          return this._sparkCustomStatusText;
+        }
         var rawText = '';
         try {
           if (originalStatusTextDesc && originalStatusTextDesc.get) {
@@ -255,6 +304,9 @@
           return 'OK';
         }
         return rawText;
+      },
+      set: function (val) {
+        this._sparkCustomStatusText = val;
       }
     });
   })();
@@ -434,16 +486,31 @@
 
     var sparkLocalForage = {
       _store: saveMemoryStore,
-      getItem: function (key) {
+      _config: {
+        name: 'localforage',
+        storeName: 'keyvaluepairs',
+        description: '',
+        driver: 'localStorageWrapper',
+        size: 4980736,
+        version: 1.0
+      },
+      INDEXEDDB: 'asyncStorage',
+      WEBSQL: 'webSQLStorage',
+      LOCALSTORAGE: 'localStorageWrapper',
+      getItem: function (key, callback) {
         var val = saveMemoryStore[key];
         if (val === undefined) {
           try {
             val = window.localStorage ? window.localStorage.getItem(key) : null;
           } catch (e) { val = null; }
         }
-        return Promise.resolve(val === undefined ? null : val);
+        var p = Promise.resolve(val === undefined ? null : val);
+        if (typeof callback === 'function') {
+          p.then(function (res) { callback(null, res); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      setItem: function (key, value) {
+      setItem: function (key, value, callback) {
         saveMemoryStore[key] = value;
         try {
           if (window.localStorage) {
@@ -455,9 +522,13 @@
           name: normalizeSaveFileName(key),
           data: typeof value === 'string' ? value : JSON.stringify(value)
         });
-        return Promise.resolve(value);
+        var p = Promise.resolve(value);
+        if (typeof callback === 'function') {
+          p.then(function (res) { callback(null, res); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      removeItem: function (key) {
+      removeItem: function (key, callback) {
         delete saveMemoryStore[key];
         try {
           if (window.localStorage) window.localStorage.removeItem(key);
@@ -466,52 +537,121 @@
           action: 'remove',
           name: normalizeSaveFileName(key)
         });
-        return Promise.resolve();
+        var p = Promise.resolve();
+        if (typeof callback === 'function') {
+          p.then(function () { callback(null); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      clear: function () {
+      clear: function (callback) {
         saveMemoryStore = Object.create(null);
-        return Promise.resolve();
+        var p = Promise.resolve();
+        if (typeof callback === 'function') {
+          p.then(function () { callback(null); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      length: function () {
-        return Promise.resolve(Object.keys(saveMemoryStore).length);
+      length: function (callback) {
+        var len = Object.keys(saveMemoryStore).length;
+        var p = Promise.resolve(len);
+        if (typeof callback === 'function') {
+          p.then(function (res) { callback(null, res); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      key: function (n) {
-        return Promise.resolve(Object.keys(saveMemoryStore)[n] || null);
+      key: function (n, callback) {
+        var k = Object.keys(saveMemoryStore)[n] || null;
+        var p = Promise.resolve(k);
+        if (typeof callback === 'function') {
+          p.then(function (res) { callback(null, res); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      keys: function () {
-        return Promise.resolve(Object.keys(saveMemoryStore));
+      keys: function (callback) {
+        var list = Object.keys(saveMemoryStore);
+        var p = Promise.resolve(list);
+        if (typeof callback === 'function') {
+          p.then(function (res) { callback(null, res); }, function (err) { callback(err); });
+        }
+        return p;
       },
-      iterate: function (iterator) {
+      iterate: function (iterator, callback) {
         var keys = Object.keys(saveMemoryStore);
+        var result;
         for (var i = 0; i < keys.length; i++) {
           var k = keys[i];
           try {
             var res = iterator(saveMemoryStore[k], k, i + 1);
-            if (res !== undefined) return Promise.resolve(res);
-          } catch (e) {}
+            if (res !== undefined) {
+              result = res;
+              break;
+            }
+          } catch (e) {
+            var errP = Promise.reject(e);
+            if (typeof callback === 'function') callback(e);
+            return errP;
+          }
         }
-        return Promise.resolve();
+        var p = Promise.resolve(result);
+        if (typeof callback === 'function') {
+          p.then(function (r) { callback(null, r); });
+        }
+        return p;
       },
-      ready: function () {
-        return Promise.resolve();
+      ready: function (callback) {
+        var p = Promise.resolve();
+        if (typeof callback === 'function') {
+          p.then(function () { callback(null); });
+        }
+        return p;
       },
-      setDriver: function () {
-        return Promise.resolve();
+      setDriver: function (drivers, callback, errorCallback) {
+        var p = Promise.resolve();
+        if (typeof callback === 'function') {
+          p.then(function () { callback(); });
+        }
+        return p;
       },
-      config: function () {
-        return true;
+      config: function (options) {
+        if (typeof options === 'object' && options !== null) {
+          for (var opt in options) {
+            if (Object.prototype.hasOwnProperty.call(options, opt)) {
+              this._config[opt] = options[opt];
+            }
+          }
+          return true;
+        }
+        if (typeof options === 'string') {
+          return this._config[options];
+        }
+        return this._config;
       },
-      defineDriver: function () {
-        return Promise.resolve();
+      defineDriver: function (driverObj, callback, errorCallback) {
+        var p = Promise.resolve();
+        if (typeof callback === 'function') {
+          p.then(function () { callback(); });
+        }
+        return p;
       },
       driver: function () {
-        return 'LOCALSTORAGE';
+        return 'localStorageWrapper';
       },
-      createInstance: function () {
-        return sparkLocalForage;
+      supports: function () {
+        return true;
       },
-      dropInstance: function () {
-        return Promise.resolve();
+      createInstance: function (options) {
+        var inst = Object.create(sparkLocalForage);
+        if (options && typeof options === 'object') {
+          inst._config = Object.assign({}, sparkLocalForage._config, options);
+        }
+        return inst;
+      },
+      dropInstance: function (options, callback) {
+        var p = Promise.resolve();
+        if (typeof callback === 'function') {
+          p.then(function () { callback(null); });
+        }
+        return p;
       }
     };
 
@@ -522,8 +662,16 @@
         get: function () {
           return sparkLocalForage;
         },
-        set: function () {
-          // Keep sparkLocalForage active to prevent indexedDB deadlock on rpgm://
+        set: function (newLF) {
+          if (newLF && typeof newLF === 'object') {
+            for (var prop in newLF) {
+              try {
+                if (typeof sparkLocalForage[prop] === 'undefined') {
+                  sparkLocalForage[prop] = newLF[prop];
+                }
+              } catch (e) {}
+            }
+          }
         }
       });
     } catch (e) {
@@ -558,16 +706,27 @@
       };
     }
 
-    // Guard StorageManager as soon as rmmz_managers.js defines it
-    var smAttempts = 0;
-    var smTimer = setInterval(function () {
-      smAttempts += 1;
-      var sm = window.StorageManager;
-      if (sm) {
-        clearInterval(smTimer);
+    // StorageManager implementation & patching for VisuMZ_1_SaveCore & CGMZ_Core
+    function patchStorageManager(sm) {
+      if (!sm || (typeof sm !== 'object' && typeof sm !== 'function')) return;
+      try {
+        sm._forageKeys = sm._forageKeys || [];
         sm.isLocalMode = function () { return false; };
-
-        var rawUpdate = sm.updateForageKeys;
+        sm.fileDirectoryPath = function () { return 'save/'; };
+        sm.localFileDirectoryPath = function () { return 'save/'; };
+        sm.filePath = function (saveName) {
+          var k = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
+          return this.fileDirectoryPath() + k;
+        };
+        if (!sm.forageKey) {
+          sm.forageKey = function (saveName) { return 'rmmzsave.' + saveName; };
+        }
+        if (!sm.isForageKey) {
+          sm.isForageKey = function (key) { return String(key || '').indexOf('rmmzsave.') === 0; };
+        }
+        sm.forageKeys = function () {
+          return this._forageKeys || [];
+        };
         sm.updateForageKeys = function () {
           this._forageKeys = [];
           var self = this;
@@ -575,78 +734,105 @@
             if (!self.isForageKey || self.isForageKey(key)) {
               self._forageKeys.push(key);
             }
+          }).then(function () {
+            return self._forageKeys;
           });
         };
-
-        sm.forageKeys = function () {
-          return this._forageKeys || [];
-        };
-
         sm.forageExists = function (saveName) {
           var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
           return sparkLocalForage.getItem(key).then(function (data) {
             return data !== null && data !== undefined;
           });
         };
-
         sm.removeForage = function (saveName) {
           var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
           return sparkLocalForage.removeItem(key);
         };
-
         sm.saveToForage = function (saveName, zip) {
           var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
           return sparkLocalForage.setItem(key, zip);
         };
-
         sm.loadFromForage = function (saveName) {
           var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
           return sparkLocalForage.getItem(key);
         };
-      } else if (smAttempts >= 600) {
+        if (!sm.saveZip) {
+          sm.saveZip = function (saveName, zip) { return this.saveToForage(saveName, zip); };
+        }
+        if (!sm.loadZip) {
+          sm.loadZip = function (saveName) { return this.loadFromForage(saveName); };
+        }
+        if (!sm.exists) {
+          sm.exists = function (saveName) { return this.forageExists(saveName); };
+        }
+        if (!sm.remove) {
+          sm.remove = function (saveName) { return this.removeForage(saveName); };
+        }
+      } catch (e) {}
+    }
+
+    window.__sparkPatchStorageManager = patchStorageManager;
+
+    if (!window.StorageManager) {
+      window.StorageManager = function StorageManager() {
+        throw new Error('This is a static class');
+      };
+    }
+    patchStorageManager(window.StorageManager);
+
+    var smAttempts = 0;
+    var smTimer = setInterval(function () {
+      smAttempts += 1;
+      if (window.StorageManager) {
+        patchStorageManager(window.StorageManager);
+      }
+      if (smAttempts >= 600) {
         clearInterval(smTimer);
       }
     }, 40);
   })();
 
-  // MARK: - 3. Property Setter Traps (Utils, DataManager, Graphics)
+  // MARK: - 3. Non-destructive shims for Utils, DataManager, Graphics, SceneManager
 
-  // Utils trap: force isNwjs() = false and browser mode
-  var _realUtils = window.Utils;
   function patchUtilsInstance(utils) {
     if (!utils || (typeof utils !== 'object' && typeof utils !== 'function')) return;
     try {
-      utils.isNwjs = function () { return false; };
-      utils.isOptionValid = function (name) {
-        if (name === 'test' || name === 'btest') return false;
-        return false;
-      };
+      var _isNwjsFn = function () { return false; };
+      try {
+        Object.defineProperty(utils, 'isNwjs', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return _isNwjsFn;
+          },
+          set: function (newFn) {
+            // Allows safe assignment in strict mode without throwing
+            _isNwjsFn = function () { return false; };
+          }
+        });
+      } catch (err) {
+        utils.isNwjs = function () { return false; };
+      }
+
+      if (!utils.isOptionValid) {
+        utils.isOptionValid = function (name) {
+          if (name === 'test' || name === 'btest') return false;
+          return false;
+        };
+      }
       utils.__sparkBrowserMode = true;
     } catch (e) {}
   }
 
-  if (_realUtils) {
-    patchUtilsInstance(_realUtils);
+  // Ensure window.Utils is a normal writable property
+  if (typeof window.Utils === 'undefined') {
+    window.Utils = function Utils() {
+      throw new Error('This is a static class');
+    };
   }
+  patchUtilsInstance(window.Utils);
 
-  try {
-    Object.defineProperty(window, 'Utils', {
-      configurable: true,
-      enumerable: true,
-      get: function () {
-        return _realUtils;
-      },
-      set: function (val) {
-        _realUtils = val;
-        patchUtilsInstance(val);
-      }
-    });
-  } catch (e) {
-    window.Utils = _realUtils;
-  }
-
-  // DataManager trap: intercept onXhrError and onError to report exact missing file
-  var _realDataManager = window.DataManager;
+  // DataManager: intercept onXhrError and onError to report exact missing file
   function patchDataManagerInstance(dm) {
     if (!dm || (typeof dm !== 'object' && typeof dm !== 'function')) return;
     try {
@@ -691,28 +877,11 @@
     } catch (e) {}
   }
 
-  if (_realDataManager) {
-    patchDataManagerInstance(_realDataManager);
+  if (typeof window.DataManager !== 'undefined') {
+    patchDataManagerInstance(window.DataManager);
   }
 
-  try {
-    Object.defineProperty(window, 'DataManager', {
-      configurable: true,
-      enumerable: true,
-      get: function () {
-        return _realDataManager;
-      },
-      set: function (val) {
-        _realDataManager = val;
-        patchDataManagerInstance(val);
-      }
-    });
-  } catch (e) {
-    window.DataManager = _realDataManager;
-  }
-
-  // Graphics trap: intercept printError to report engine errors to Swift
-  var _realGraphics = window.Graphics;
+  // Graphics: intercept printError to report engine errors to Swift with formatted stack
   function patchGraphicsInstance(gfx) {
     if (!gfx || (typeof gfx !== 'object' && typeof gfx !== 'function')) return;
     try {
@@ -720,9 +889,13 @@
       gfx.__sparkPatched = true;
 
       var origPrintError = gfx.printError;
-      gfx.printError = function (name, message) {
-        var detail = (name ? name + ': ' : '') + (message || '');
-        report('graphics.error', detail, '', 0);
+      gfx.printError = function (name, message, error) {
+        var title = (name ? name + ': ' : '') + (message || '');
+        var formatted = error ? formatError(error) : title;
+        if (formatted.indexOf(title) === -1) {
+          formatted = title + '\n' + formatted;
+        }
+        report('graphics.error', formatted, '', 0);
         if (origPrintError) {
           return origPrintError.apply(this, arguments);
         }
@@ -730,24 +903,39 @@
     } catch (e) {}
   }
 
-  if (_realGraphics) {
-    patchGraphicsInstance(_realGraphics);
+  if (typeof window.Graphics !== 'undefined') {
+    patchGraphicsInstance(window.Graphics);
   }
 
-  try {
-    Object.defineProperty(window, 'Graphics', {
-      configurable: true,
-      enumerable: true,
-      get: function () {
-        return _realGraphics;
-      },
-      set: function (val) {
-        _realGraphics = val;
-        patchGraphicsInstance(val);
-      }
-    });
-  } catch (e) {
-    window.Graphics = _realGraphics;
+  // SceneManager: catchNormalError and catchException reporting
+  function patchSceneManagerInstance(sm) {
+    if (!sm || (typeof sm !== 'object' && typeof sm !== 'function')) return;
+    try {
+      if (sm.__sparkPatched) return;
+      sm.__sparkPatched = true;
+
+      var origCatchNormalError = sm.catchNormalError;
+      sm.catchNormalError = function (e) {
+        var formatted = formatError(e);
+        report('engine.error', formatted, '', 0);
+        if (origCatchNormalError) {
+          return origCatchNormalError.apply(this, arguments);
+        }
+      };
+
+      var origCatchException = sm.catchException;
+      sm.catchException = function (e) {
+        var formatted = formatError(e);
+        report('engine.error', formatted, '', 0);
+        if (origCatchException) {
+          return origCatchException.apply(this, arguments);
+        }
+      };
+    } catch (e) {}
+  }
+
+  if (typeof window.SceneManager !== 'undefined') {
+    patchSceneManagerInstance(window.SceneManager);
   }
 
   // Continuous fallback poller in case static classes are reassigned or defined late
@@ -757,6 +945,10 @@
     if (window.Utils) patchUtilsInstance(window.Utils);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
     if (window.Graphics) patchGraphicsInstance(window.Graphics);
+    if (window.SceneManager) patchSceneManagerInstance(window.SceneManager);
+    if (window.StorageManager && window.__sparkPatchStorageManager) {
+      window.__sparkPatchStorageManager(window.StorageManager);
+    }
     if (enginePollAttempts >= 600) {
       clearInterval(enginePollTimer);
     }
@@ -835,6 +1027,9 @@
     sceneAttempts += 1;
     var sm = window.SceneManager;
     if (sm) {
+      if (typeof patchSceneManagerInstance === 'function') {
+        patchSceneManagerInstance(sm);
+      }
       var currentScene = sm._scene || sm._nextScene;
       if (currentScene) {
         var name = (currentScene.constructor && currentScene.constructor.name) || '';

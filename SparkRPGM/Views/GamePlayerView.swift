@@ -289,7 +289,8 @@ struct GamePlayerView: View {
         }
     }
 
-    private var errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
+    @ViewBuilder
+    private func errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
         ZStack {
             SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
 

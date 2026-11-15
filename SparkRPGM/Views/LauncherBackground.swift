@@ -110,7 +110,7 @@ struct LauncherBackground: View {
         .onChange(of: launcher.wallpaperRevision) { _ in reloadWallpaperIfNeeded() }
         .onChange(of: settings.wallpaperVersion) { _ in reloadWallpaperIfNeeded() }
         .onChange(of: settings.liquidGlassEnabled) { _ in loadCoverIfNeeded() }
-        .onChange(of: coverURL?.absoluteString) { _ in loadCoverIfNeeded() }
+        .onChange(of: coverURL) { _ in loadCoverIfNeeded() }
     }
 
     private func reloadWallpaperIfNeeded() {

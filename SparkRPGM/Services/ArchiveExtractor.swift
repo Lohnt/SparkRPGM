@@ -192,6 +192,8 @@ final class ArchiveExtractor {
         let total = entries.count
         let fileManager = FileManager.default
         var extracted = 0
+        var lastReportTime = CFAbsoluteTimeGetCurrent()
+        var lastReportedExtracted = 0
 
         for entry in entries {
             if token.isCancelled { throw ArchiveError.cancelled }
@@ -232,7 +234,10 @@ final class ArchiveExtractor {
             }
 
             extracted += 1
-            if extracted % 5 == 0 || extracted == total {
+            let now = CFAbsoluteTimeGetCurrent()
+            if extracted == total || (extracted - lastReportedExtracted >= 50 && now - lastReportTime >= 0.1) {
+                lastReportTime = now
+                lastReportedExtracted = extracted
                 progress(Progress(
                     fraction: 0.05 + 0.9 * Double(extracted) / Double(max(total, 1)),
                     status: "Extracting \(extracted) of \(total)",
@@ -294,6 +299,9 @@ final class ArchiveExtractor {
         guard !entries.isEmpty else { throw ArchiveError.emptyArchive }
 
         let total = max(entries.count, 1)
+        var lastReportTime = CFAbsoluteTimeGetCurrent()
+        var lastReportedIndex = 0
+
         for (index, entry) in entries.enumerated() {
             if token.isCancelled { throw ArchiveError.cancelled }
 
@@ -318,7 +326,11 @@ final class ArchiveExtractor {
                 }
             }
 
-            if index % 25 == 0 || index == entries.count - 1 {
+            let isFinal = index == entries.count - 1
+            let now = CFAbsoluteTimeGetCurrent()
+            if isFinal || (index - lastReportedIndex >= 50 && now - lastReportTime >= 0.1) {
+                lastReportTime = now
+                lastReportedIndex = index
                 progress(Progress(
                     fraction: 0.05 + 0.9 * Double(index + 1) / Double(total),
                     status: "Extracting \(index + 1) of \(entries.count)",
@@ -356,6 +368,8 @@ final class ArchiveExtractor {
 
         guard !entries.isEmpty else { throw ArchiveError.emptyArchive }
         let total = max(entries.count, 1)
+        var lastReportTime = CFAbsoluteTimeGetCurrent()
+        var lastReportedIndex = 0
 
         for (index, entry) in entries.enumerated() {
             if token.isCancelled { throw ArchiveError.cancelled }
@@ -380,7 +394,11 @@ final class ArchiveExtractor {
                 }
             }
 
-            if index % 10 == 0 || index == entries.count - 1 {
+            let isFinal = index == entries.count - 1
+            let now = CFAbsoluteTimeGetCurrent()
+            if isFinal || (index - lastReportedIndex >= 50 && now - lastReportTime >= 0.1) {
+                lastReportTime = now
+                lastReportedIndex = index
                 progress(Progress(
                     fraction: 0.05 + 0.9 * Double(index + 1) / Double(total),
                     status: "Extracting \(index + 1) of \(entries.count)",

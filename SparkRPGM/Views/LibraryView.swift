@@ -192,11 +192,20 @@ struct LibraryView: View {
     }
 
     private var ambientCoverURL: URL? {
-        let visible = store.games.filter { !store.isGameHidden($0) }
+        let visible = store.games.filter { !store.isGameHidden($0) && $0.coverURL != nil }
         let sorted = visible.sorted {
             ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast)
         }
         return sorted.first?.coverURL
+    }
+
+    private func hideGame(_ game: Game) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            if selectedGame?.folderName == game.folderName {
+                selectedGame = nil
+            }
+            store.hideGame(game)
+        }
     }
 
     // MARK: - Search and filters
@@ -350,7 +359,7 @@ struct LibraryView: View {
                     onRemoveCover: { store.removeCustomCover(for: game) },
                     onChangeLineColor: { route = .lineColor(game) },
                     onBackup: { backup(game) },
-                    onHide: { store.hideGame(game) },
+                    onHide: { hideGame(game) },
                     onDelete: {
                         deleteTarget = game
                         showDeleteDialog = true
@@ -378,7 +387,7 @@ struct LibraryView: View {
                     onRemoveCover: { store.removeCustomCover(for: game) },
                     onChangeLineColor: { route = .lineColor(game) },
                     onBackup: { backup(game) },
-                    onHide: { store.hideGame(game) },
+                    onHide: { hideGame(game) },
                     onDelete: {
                         deleteTarget = game
                         showDeleteDialog = true

@@ -103,6 +103,7 @@ struct GamePlayerView: View {
     @State private var scope: ControlSettingsStore.Scope = .game
     @State private var didConfigure = false
     @State private var speedMultiplier = 1
+    @State private var hasCopiedError = false
 
     private static let haptic = UIImpactFeedbackGenerator(style: .light)
 
@@ -140,6 +141,13 @@ struct GamePlayerView: View {
                     showsContinue: true
                 )
                 .zIndex(22)
+            } else if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !session.isLoading, diagnostic != GameSession.slowBootNotice {
+                errorOverlay(
+                    message: diagnostic,
+                    detail: diagnosticDetail,
+                    showsContinue: true
+                )
+                .zIndex(22)
             }
 
             if !gameFailed {
@@ -159,7 +167,7 @@ struct GamePlayerView: View {
                     .zIndex(8)
             }
 
-            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, !session.isLoading {
+            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, !session.isLoading, diagnostic == GameSession.slowBootNotice {
                 errorBanner(diagnostic)
                     .zIndex(15)
             }
@@ -292,70 +300,164 @@ struct GamePlayerView: View {
     @ViewBuilder
     private func errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
         let parsed = parseErrorMessage(message: message, detail: detail)
+        let fullErrorText: String = {
+            if let trace = parsed.trace, !trace.isEmpty {
+                return "\(parsed.headline)\n\n\(trace)"
+            }
+            return parsed.headline
+        }()
 
         ZStack {
-            SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
+            // Dark solid backdrop blocking raw canvas stack text
+            Color.black.opacity(0.72)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
 
-            VStack(spacing: 14) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 26, weight: .light))
-                    .foregroundColor(Color.orange.opacity(0.9))
+            VStack(spacing: 0) {
+                // Pinned Header
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.orange)
 
-                Text("The game could not start")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(SparkTheme.textPrimary)
+                        Text("Game Error")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(SparkTheme.textPrimary)
 
-                Text(parsed.headline)
-                    .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
-                    .foregroundColor(SparkTheme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.red.opacity(0.18))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(Color.red.opacity(0.4), lineWidth: 1)
-                            )
-                    )
-                    .padding(.horizontal, 24)
-
-                if let trace = parsed.trace, !trace.isEmpty {
-                    ScrollView {
-                        Text(trace)
-                            .font(.system(size: 9.5, design: .monospaced))
-                            .foregroundColor(SparkTheme.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(9)
+                        Spacer()
                     }
-                    .frame(maxWidth: 360, maxHeight: 130)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
-                    )
-                    .padding(.horizontal, 24)
+
+                    // Pinned Prominent Monospaced Error Title (TypeError: ...)
+                    Text(parsed.headline)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundColor(SparkTheme.textPrimary)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.red.opacity(0.18))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(Color.red.opacity(0.4), lineWidth: 1)
+                        )
                 }
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 10)
 
+                Divider()
+                    .background(SparkTheme.hairline)
+
+                // Scrollable, Selectable Stack Trace Body
+                ScrollView(.vertical, showsIndicators: true) {
+                    Text(parsed.trace ?? "No additional stack trace available.")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(SparkTheme.textSecondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                }
+                .background(Color.black.opacity(0.25))
+
+                Divider()
+                    .background(SparkTheme.hairline)
+
+                // Action Buttons Bar: Copy Error, Dismiss, Back to Library
                 HStack(spacing: 10) {
-                    overlayButton("Retry", highlighted: false) {
-                        session.loadGame()
-                    }
-                    overlayButton("Close", highlighted: true) {
-                        close()
-                    }
-                    if showsContinue {
-                        overlayButton("Continue", highlighted: false) {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                session.dismissDiagnostic()
+                    Button {
+                        UIPasteboard.general.string = fullErrorText
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            hasCopiedError = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                hasCopiedError = false
                             }
                         }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: hasCopiedError ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 11, weight: .medium))
+                            Text(hasCopiedError ? "Copied!" : "Copy Error")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(hasCopiedError ? Color.green : SparkTheme.textPrimary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(hasCopiedError ? Color.green.opacity(0.15) : Color.white.opacity(0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(hasCopiedError ? Color.green.opacity(0.4) : SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
+                        )
                     }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Spacer()
+
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            session.dismissDiagnostic()
+                        }
+                    } label: {
+                        Text("Dismiss")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(SparkTheme.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.white.opacity(0.06))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+
+                    Button {
+                        close()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.backward")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text("Back to Library")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(Color.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(accent)
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
             }
+            .frame(maxWidth: 560, maxHeight: 360)
+            .background(
+                ZStack {
+                    SparkTheme.panelRaised
+                    VisualEffectBlur(style: .systemUltraThinMaterialDark)
+                }
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(SparkTheme.hairlineStrong, lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.45), radius: 24, x: 0, y: 12)
+            .padding(24)
         }
     }
 

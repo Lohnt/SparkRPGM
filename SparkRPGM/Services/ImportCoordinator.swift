@@ -53,6 +53,7 @@ final class ImportCoordinator: ObservableObject {
     private var isProcessing = false
     private var cancellationTokens: [UUID: ImportCancellationToken] = [:]
     private var activeURLs = Set<String>()
+    private var lastDeliveryTimes: [UUID: CFAbsoluteTime] = [:]
 
     init(store: GameStore) {
         self.store = store
@@ -211,9 +212,18 @@ final class ImportCoordinator: ObservableObject {
         }
     }
 
-    /// Hops to the main actor for every progress update so the SwiftUI card is
-    /// always mutated from the same isolated context.
+    /// Hops to the main actor for progress updates, throttled to at most ~10 Hz
+    /// (plus guaranteed delivery for completion/terminal stages) so SwiftUI does
+    /// not re-render thousands of times during extraction.
     private func deliver(_ update: ArchiveExtractor.Progress, jobID: UUID) {
+        let isFinal = update.phase == .imported || update.fraction == 1.0 || (update.completedFiles != nil && update.completedFiles == update.totalFiles)
+        let now = CFAbsoluteTimeGetCurrent()
+        let last = lastDeliveryTimes[jobID] ?? 0
+        if !isFinal && (now - last < 0.1) {
+            return
+        }
+        lastDeliveryTimes[jobID] = now
+
         Task { @MainActor [weak self] in
             guard let self = self else { return }
             self.update(jobID: jobID) { job in
@@ -246,6 +256,7 @@ final class ImportCoordinator: ObservableObject {
             guard !self.isProcessing, self.queue.isEmpty else { return }
             self.isShowingProgress = false
             self.jobs.removeAll { $0.isFinished }
+            self.lastDeliveryTimes.removeAll()
         }
     }
 }

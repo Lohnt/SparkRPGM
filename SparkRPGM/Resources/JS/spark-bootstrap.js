@@ -174,6 +174,195 @@
     return String(err);
   }
 
+  // MARK: - VisuStella MZ & PluginManager Compatibility Guards
+
+  function makeSafeVisuMZProxy(target) {
+    if (!target || (typeof target !== 'object' && typeof target !== 'function')) {
+      target = {};
+    }
+    if (target.__sparkIsSafeProxy) return target;
+
+    var handler = {
+      get: function (obj, prop) {
+        if (prop === '__sparkIsSafeProxy') return true;
+        if (typeof prop === 'symbol') return obj[prop];
+        if (prop in obj) {
+          var val = obj[prop];
+          if (val && typeof val === 'object' && !val.__sparkIsSafeProxy && !Array.isArray(val)) {
+            val = makeSafeVisuMZProxy(val);
+            obj[prop] = val;
+          }
+          return val;
+        }
+        // Auto-initialize uninitialized namespace on VisuMZ as a safe proxy
+        var sub = makeSafeVisuMZProxy({});
+        obj[prop] = sub;
+        return sub;
+      }
+    };
+
+    try {
+      var p = new Proxy(target, handler);
+      p.__sparkIsSafeProxy = true;
+      return p;
+    } catch (e) {
+      return target;
+    }
+  }
+
+  var rawVisuMZ = window.VisuMZ;
+  var visuMZProxy = rawVisuMZ ? makeSafeVisuMZProxy(rawVisuMZ) : null;
+  try {
+    Object.defineProperty(window, 'VisuMZ', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        if (!visuMZProxy) {
+          rawVisuMZ = rawVisuMZ || {};
+          visuMZProxy = makeSafeVisuMZProxy(rawVisuMZ);
+        }
+        return visuMZProxy;
+      },
+      set: function (newVal) {
+        if (newVal && typeof newVal === 'object') {
+          rawVisuMZ = newVal;
+          visuMZProxy = makeSafeVisuMZProxy(newVal);
+        } else {
+          rawVisuMZ = newVal;
+          visuMZProxy = null;
+        }
+      }
+    });
+  } catch (e) {}
+
+  function sanitizePluginsList(list) {
+    if (Array.isArray(list)) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] && typeof list[i] === 'object') {
+          list[i].parameters = list[i].parameters || {};
+        }
+      }
+    }
+  }
+
+  var rawPlugins = window.$plugins;
+  if (rawPlugins) sanitizePluginsList(rawPlugins);
+  try {
+    Object.defineProperty(window, '$plugins', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawPlugins;
+      },
+      set: function (val) {
+        rawPlugins = val;
+        sanitizePluginsList(rawPlugins);
+      }
+    });
+  } catch (e) {}
+
+  function patchPluginManager(pm) {
+    if (!pm) return;
+    try {
+      if (typeof pm.parameters === 'function' && !pm.parameters.__sparkWrapped) {
+        var origParams = pm.parameters;
+        var wrappedParams = function (name) {
+          try {
+            var res = origParams.apply(this, arguments);
+            if (res && typeof res === 'object') return res;
+          } catch (e) {}
+          var key = String(name || '').toLowerCase();
+          if (this._parameters && this._parameters[key]) {
+            return this._parameters[key];
+          }
+          return {};
+        };
+        wrappedParams.__sparkWrapped = true;
+        pm.parameters = wrappedParams;
+      }
+
+      if (typeof pm.setup === 'function' && !pm.setup.__sparkWrapped) {
+        var origSetup = pm.setup;
+        var wrappedSetup = function (plugins) {
+          sanitizePluginsList(plugins);
+          return origSetup.apply(this, arguments);
+        };
+        wrappedSetup.__sparkWrapped = true;
+        pm.setup = wrappedSetup;
+      }
+    } catch (e) {}
+  }
+
+  var rawPluginManager = window.PluginManager;
+  if (rawPluginManager) patchPluginManager(rawPluginManager);
+  try {
+    Object.defineProperty(window, 'PluginManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawPluginManager;
+      },
+      set: function (val) {
+        rawPluginManager = val;
+        patchPluginManager(val);
+      }
+    });
+  } catch (e) {}
+
+  function patchGameSystem(gs) {
+    if (!gs || !gs.prototype || typeof gs.prototype.initialize !== 'function' || gs.prototype.initialize.__sparkWrapped) return;
+    var origInit = gs.prototype.initialize;
+    var wrappedInit = function () {
+      try {
+        return origInit.apply(this, arguments);
+      } catch (e) {
+        var formatted = formatError(e);
+        report('plugin.warning', 'Game_System.initialize recovered: ' + formatted, '', 0);
+        try {
+          if (window.console && window.console.warn) {
+            window.console.warn('[SparkBoot] Game_System.initialize caught error:', formatted);
+          }
+        } catch (err) {}
+        if (this._saveEnabled === undefined) this._saveEnabled = true;
+        if (this._menuEnabled === undefined) this._menuEnabled = true;
+        if (this._encounterEnabled === undefined) this._encounterEnabled = true;
+        if (this._formationEnabled === undefined) this._formationEnabled = true;
+        this._battleCount = this._battleCount || 0;
+        this._winCount = this._winCount || 0;
+        this._escapeCount = this._escapeCount || 0;
+        this._saveCount = this._saveCount || 0;
+        this._versionId = this._versionId || 0;
+        this._framesOnSave = this._framesOnSave || 0;
+        this._bgmOnSave = this._bgmOnSave || null;
+        this._bgsOnSave = this._bgsOnSave || null;
+        this._windowTone = this._windowTone || null;
+        this._battleBgm = this._battleBgm || null;
+        this._victoryMe = this._victoryMe || null;
+        this._defeatMe = this._defeatMe || null;
+        this._savedBgm = this._savedBgm || null;
+        this._walkingBgm = this._walkingBgm || null;
+      }
+    };
+    wrappedInit.__sparkWrapped = true;
+    gs.prototype.initialize = wrappedInit;
+  }
+
+  var rawGameSystem = window.Game_System;
+  if (rawGameSystem) patchGameSystem(rawGameSystem);
+  try {
+    Object.defineProperty(window, 'Game_System', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawGameSystem;
+      },
+      set: function (val) {
+        rawGameSystem = val;
+        patchGameSystem(val);
+      }
+    });
+  } catch (e) {}
+
   // MARK: - Console & Exception Logging
 
   var originalConsoleError = window.console ? window.console.error : null;
@@ -1106,6 +1295,16 @@
       }
       wrapDataManagerGlobalInfo(dm);
       wrapDataManagerCreateGameObjects(dm);
+    }
+
+    if (window.PluginManager) {
+      patchPluginManager(window.PluginManager);
+    }
+    if (window.Game_System) {
+      patchGameSystem(window.Game_System);
+    }
+    if (window.VisuMZ && !window.VisuMZ.__sparkIsSafeProxy) {
+      window.VisuMZ = makeSafeVisuMZProxy(window.VisuMZ);
     }
   }
 

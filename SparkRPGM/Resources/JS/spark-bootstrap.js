@@ -1010,17 +1010,144 @@
     patchSceneManagerInstance(window.SceneManager);
   }
 
+  // MARK: - iOS 15 WebM Video & FontManager Fallback Hooks
+
+  function isVideoFormatSupported(src) {
+    if (!src) return true;
+    var extMatch = String(src).match(/\.([a-zA-Z0-9]+)(?:\?|#|$)/);
+    var ext = extMatch ? extMatch[1].toLowerCase() : '';
+    if (ext === 'webm') return false; // iOS 15 WKWebView does not support .webm video
+
+    var mime = '';
+    if (ext === 'mp4' || ext === 'm4v') mime = 'video/mp4';
+    else if (ext === 'mov') mime = 'video/quicktime';
+    else if (ext === 'ogv' || ext === 'ogg') mime = 'video/ogg';
+
+    if (mime) {
+      try {
+        var v = document.createElement('video');
+        var can = v.canPlayType(mime);
+        return can !== '' && can !== 'no';
+      } catch (e) {
+        return true;
+      }
+    }
+    return true;
+  }
+
+  function hookVideo(v) {
+    if (!v || v.__sparkHooked) return;
+    v.__sparkHooked = true;
+
+    var origPlay = v.play;
+    if (typeof origPlay === 'function') {
+      v.play = function (src) {
+        if (!isVideoFormatSupported(src)) {
+          report('info', 'Skipping unsupported video format on iOS: ' + src, src, 0);
+          v._loading = false;
+          try {
+            if (typeof v._onEnd === 'function') {
+              v._onEnd();
+            } else if (typeof v._onVideoEnd === 'function') {
+              v._onVideoEnd();
+            }
+          } catch (e) {}
+          return;
+        }
+        return origPlay.apply(this, arguments);
+      };
+    }
+  }
+
+  function hookGraphicsVideo(gfx) {
+    if (!gfx || gfx.__sparkVideoHooked) return;
+    gfx.__sparkVideoHooked = true;
+
+    var origPlayVideo = gfx.playVideo;
+    if (typeof origPlayVideo === 'function') {
+      gfx.playVideo = function (src) {
+        if (!isVideoFormatSupported(src)) {
+          report('info', 'Skipping unsupported video format on iOS: ' + src, src, 0);
+          gfx._videoLoading = false;
+          try {
+            if (typeof gfx._onVideoEnd === 'function') {
+              gfx._onVideoEnd();
+            }
+          } catch (e) {}
+          if (window.Video) {
+            window.Video._loading = false;
+            try {
+              if (typeof window.Video._onEnd === 'function') {
+                window.Video._onEnd();
+              }
+            } catch (e) {}
+          }
+          return;
+        }
+        return origPlayVideo.apply(this, arguments);
+      };
+    }
+  }
+
+  function hookFontManager(fm) {
+    if (!fm || fm.__sparkHooked) return;
+    fm.__sparkHooked = true;
+
+    var origLoad = fm.load;
+    if (typeof origLoad === 'function') {
+      fm.load = function (family, url) {
+        var self = this;
+        setTimeout(function () {
+          if (self._states && self._states[family] === 'loading') {
+            report('info', 'Font load timed out after 2s, marking loaded: ' + family, url || '', 0);
+            self._states[family] = 'loaded';
+          }
+        }, 2000);
+        return origLoad.apply(this, arguments);
+      };
+    }
+
+    var origIsReady = fm.isReady;
+    fm.isReady = function () {
+      if (this._states) {
+        for (var family in this._states) {
+          if (this._states[family] === 'loading') {
+            if (!this._sparkTimers) this._sparkTimers = {};
+            if (!this._sparkTimers[family]) {
+              this._sparkTimers[family] = Date.now();
+            } else if (Date.now() - this._sparkTimers[family] > 2000) {
+              report('info', 'Font stalled > 2s in isReady(), marking loaded: ' + family, '', 0);
+              this._states[family] = 'loaded';
+            }
+          }
+        }
+      }
+      if (origIsReady) {
+        return origIsReady.apply(this, arguments);
+      }
+      return true;
+    };
+  }
+
+  if (typeof window.Video !== 'undefined') hookVideo(window.Video);
+  if (typeof window.FontManager !== 'undefined') hookFontManager(window.FontManager);
+
   // Continuous fallback poller in case static classes are reassigned or defined late
   var enginePollAttempts = 0;
   var enginePollTimer = setInterval(function () {
     enginePollAttempts += 1;
     if (window.Utils) patchUtilsInstance(window.Utils);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
-    if (window.Graphics) patchGraphicsInstance(window.Graphics);
+    if (window.Graphics) {
+      patchGraphicsInstance(window.Graphics);
+      hookGraphicsVideo(window.Graphics);
+    }
     if (window.SceneManager) patchSceneManagerInstance(window.SceneManager);
     if (window.StorageManager && window.__sparkPatchStorageManager) {
       window.__sparkPatchStorageManager(window.StorageManager);
     }
+    if (window.Video) hookVideo(window.Video);
+    if (window.FontManager) hookFontManager(window.FontManager);
     if (enginePollAttempts >= 600) {
       clearInterval(enginePollTimer);
     }
@@ -1080,101 +1207,159 @@
     });
   })();
 
-  // MARK: - 3-Second Readiness Blockers Watchdog
+  // MARK: - Continuous Scene & Asset Stall Watchdog
 
-  var readinessWatchdogStarted = false;
-  function startReadinessWatchdog() {
-    if (readinessWatchdogStarted) return;
-    readinessWatchdogStarted = true;
+  var stallStartTime = null;
+  var lastReportedStallText = '';
 
-    setTimeout(function checkReadiness() {
-      if (window.Spark && window.Spark.readySent) return;
+  function reportStall(diagnosticMessage) {
+    if (!diagnosticMessage || diagnosticMessage === lastReportedStallText) return;
+    lastReportedStallText = diagnosticMessage;
+    post('sparkError', {
+      kind: 'stall',
+      message: shorten(diagnosticMessage, 1500),
+      source: '',
+      line: 0,
+      engine: cfg.engine || 'unknown',
+      title: cfg.gameTitle || '',
+      readySent: !!(window.Spark && window.Spark.readySent)
+    });
+  }
 
-      var sm = window.SceneManager;
-      if (!sm) return;
+  function checkReadinessWatchdog() {
+    var sm = window.SceneManager;
+    var gfx = window.Graphics;
+    if (!sm && !gfx) return;
 
-      var scene = sm._scene || sm._nextScene;
-      var sceneName = (scene && scene.constructor && scene.constructor.name) || 'Scene_Boot';
-      var isSceneReady = false;
+    var scene = (sm && (sm._scene || sm._nextScene)) || null;
+    var sceneName = (scene && scene.constructor && scene.constructor.name) || 'Scene_Boot';
+
+    var isSceneReady = true;
+    if (scene && typeof scene.isReady === 'function') {
       try {
-        isSceneReady = scene && typeof scene.isReady === 'function' ? scene.isReady() : false;
+        isSceneReady = scene.isReady();
       } catch (e) {
         isSceneReady = false;
       }
+    }
 
-      var loadingCount = 0;
-      try {
-        loadingCount = (window.Graphics && typeof window.Graphics._loadingCount === 'number') ? window.Graphics._loadingCount : 0;
-      } catch (e) {}
+    var loadingCount = (gfx && typeof gfx._loadingCount === 'number') ? gfx._loadingCount : 0;
+    var videoLoading = !!((window.Video && window.Video._loading) || (gfx && gfx._videoLoading));
 
-      if (loadingCount > 0 || !isSceneReady) {
-        var blockers = [];
+    var isStalled = (loadingCount > 0) || (scene && !isSceneReady) || videoLoading;
 
-        var dm = window.DataManager;
-        if (dm) {
-          try {
-            if (typeof dm.isDatabaseLoaded === 'function' && !dm.isDatabaseLoaded()) {
-              blockers.push('DataManager.isDatabaseLoaded() is false');
+    var now = Date.now();
+    if (!isStalled) {
+      stallStartTime = null;
+      return;
+    }
+
+    if (!stallStartTime) {
+      stallStartTime = now;
+      return;
+    }
+
+    if (now - stallStartTime >= 2500) {
+      var dbLoaded = 'n/a';
+      var giLoaded = 'n/a';
+      var dm = window.DataManager;
+      if (dm) {
+        try {
+          if (typeof dm.isDatabaseLoaded === 'function') {
+            dbLoaded = String(dm.isDatabaseLoaded());
+          }
+        } catch (e) { dbLoaded = 'err'; }
+        try {
+          if (typeof dm.isGlobalInfoLoaded === 'function') {
+            giLoaded = String(dm.isGlobalInfoLoaded());
+          }
+        } catch (e) { giLoaded = 'err'; }
+      }
+
+      var unreadyBitmaps = [];
+      function recordBitmap(bmp, key) {
+        if (!bmp) return;
+        try {
+          if (typeof bmp.isReady === 'function' && !bmp.isReady()) {
+            var url = bmp._url || bmp.url || key || 'unknown';
+            var state = bmp._loadingState || (typeof bmp.isError === 'function' && bmp.isError() ? 'error' : 'loading');
+            unreadyBitmaps.push(url + ' [' + state + ']');
+          }
+        } catch (e) {}
+      }
+
+      function inspectBitmaps(target) {
+        if (!target) return;
+        try {
+          if (target._inner) inspectBitmaps(target._inner);
+          if (typeof target.forEach === 'function') {
+            target.forEach(function (bmp, k) {
+              recordBitmap(bmp, k);
+            });
+          } else if (typeof target === 'object') {
+            for (var k in target) {
+              if (!Object.prototype.hasOwnProperty.call(target, k)) continue;
+              recordBitmap(target[k], k);
             }
-          } catch (e) {}
-          try {
-            if (typeof dm.isGlobalInfoLoaded === 'function' && !dm.isGlobalInfoLoaded()) {
-              blockers.push('DataManager.isGlobalInfoLoaded() is false');
-            }
-          } catch (e) {}
-        }
+          }
+        } catch (e) {}
+      }
 
-        var im = window.ImageManager;
-        if (im) {
-          try {
-            if (typeof im.isReady === 'function' && !im.isReady()) {
-              blockers.push('ImageManager.isReady() is false');
-              if (im._cache) {
-                for (var key in im._cache) {
-                  var bmp = im._cache[key];
-                  if (bmp && typeof bmp.isReady === 'function' && !bmp.isReady()) {
-                    blockers.push('Image pending: ' + (bmp._url || key));
-                  }
-                }
+      var im = window.ImageManager;
+      if (im) {
+        inspectBitmaps(im._cache);
+        inspectBitmaps(im._system);
+      }
+
+      var fm = window.FontManager;
+      var fmReady = 'n/a';
+      var unreadyFonts = [];
+      if (fm) {
+        try {
+          if (typeof fm.isReady === 'function') {
+            fmReady = String(fm.isReady());
+          }
+          if (fm._states) {
+            for (var fontName in fm._states) {
+              if (fm._states[fontName] !== 'loaded') {
+                unreadyFonts.push(fontName + ' (' + fm._states[fontName] + ')');
               }
             }
-          } catch (e) {}
-        }
-
-        var fm = window.FontManager;
-        if (fm) {
-          try {
-            if (typeof fm.isReady === 'function' && !fm.isReady()) {
-              blockers.push('FontManager.isReady() is false');
-            }
-          } catch (e) {}
-        }
-
-        var xhrKeys = Object.keys(pendingXHRs);
-        if (xhrKeys.length > 0) {
-          xhrKeys.forEach(function (url) {
-            blockers.push('XHR pending: ' + url);
-          });
-        }
-
-        var imgKeys = Object.keys(pendingImages);
-        if (imgKeys.length > 0) {
-          imgKeys.forEach(function (url) {
-            blockers.push('Image pending: ' + url);
-          });
-        }
-
-        if (blockers.length === 0) {
-          blockers.push(sceneName + '.isReady() is false');
-        }
-
-        var msg = 'Readiness blocker in ' + sceneName + (loadingCount > 0 ? ' (loadingCount=' + loadingCount + ')' : '') + ':\n' + blockers.join('\n');
-        report('stall', msg, '', 0);
-
-        setTimeout(checkReadiness, 3000);
+          }
+        } catch (e) {}
       }
-    }, 3000);
+
+      var xhrKeys = Object.keys(pendingXHRs || {});
+
+      var lines = [];
+      lines.push('Scene: ' + sceneName);
+      lines.push('LoadingCount: ' + loadingCount);
+      lines.push('DB / GlobalInfo: DB=' + dbLoaded + ', GlobalInfo=' + giLoaded);
+
+      var fontVideo = 'FontManager.isReady()=' + fmReady;
+      if (unreadyFonts.length > 0) {
+        fontVideo += ' [' + unreadyFonts.join(', ') + ']';
+      }
+      fontVideo += ' | Video._loading=' + videoLoading;
+      lines.push('Fonts / Video: ' + fontVideo);
+
+      if (unreadyBitmaps.length > 0) {
+        lines.push('Unready Bitmaps (' + unreadyBitmaps.length + '): ' + unreadyBitmaps.slice(0, 4).join(', ') + (unreadyBitmaps.length > 4 ? ' (+' + (unreadyBitmaps.length - 4) + ' more)' : ''));
+      } else {
+        lines.push('Unready Bitmaps: none');
+      }
+
+      if (xhrKeys.length > 0) {
+        lines.push('Pending XHRs (' + xhrKeys.length + '): ' + xhrKeys.slice(0, 3).join(', '));
+      }
+
+      var diagnosticText = 'Stall detected (>2.5s):\n' + lines.join('\n');
+      reportStall(diagnosticText);
+    }
   }
+
+  // Poll continuously every 2.5 seconds
+  setInterval(checkReadinessWatchdog, 2500);
 
   // MARK: - Milestone Listeners (DOM, main.js, Scenes)
 
@@ -1198,24 +1383,30 @@
       if (typeof patchSceneManagerInstance === 'function') {
         patchSceneManagerInstance(sm);
       }
-      startReadinessWatchdog();
       var currentScene = sm._scene || sm._nextScene;
       if (currentScene) {
         var name = (currentScene.constructor && currentScene.constructor.name) || '';
         if (name === 'Scene_Boot') {
-          reportStage('Scene_Boot started');
-        } else if (name === 'Scene_Title') {
-          clearInterval(sceneTimer);
-          window.Spark = window.Spark || {};
-          window.Spark.readySent = true;
-          reportStage('Title screen active', true);
-          post('gameReady', { reason: 'title-active', hasEngine: true });
+          if (!window.Spark || !window.Spark._bootStarted) {
+            window.Spark = window.Spark || {};
+            window.Spark._bootStarted = true;
+            reportStage('Scene_Boot started');
+          }
         } else if (name) {
-          clearInterval(sceneTimer);
-          window.Spark = window.Spark || {};
-          window.Spark.readySent = true;
-          reportStage(name + ' active', true);
-          post('gameReady', { reason: 'scene-active', hasEngine: true });
+          var isReady = false;
+          try {
+            isReady = typeof currentScene.isReady === 'function' ? currentScene.isReady() : true;
+          } catch (e) {
+            isReady = true;
+          }
+          if (isReady && (!window.Spark || !window.Spark.readySent)) {
+            clearInterval(sceneTimer);
+            window.Spark = window.Spark || {};
+            window.Spark.readySent = true;
+            var label = name === 'Scene_Title' ? 'Title screen active' : name + ' active';
+            reportStage(label, true);
+            post('gameReady', { reason: name === 'Scene_Title' ? 'title-active' : 'scene-active', hasEngine: true });
+          }
         }
       }
     }

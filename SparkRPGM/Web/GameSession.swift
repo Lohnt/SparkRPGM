@@ -33,6 +33,8 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var missingResources: [String] = []
     /// Set by the watchdog when the game has not signalled readiness in time.
     @Published private(set) var didStall = false
+    /// Whether the user dismissed the top diagnostic banner. Reset automatically on incoming updates.
+    @Published private(set) var isDiagnosticDismissed = false
 
     private(set) var webView: WKWebView!
     private let resolver: CaseInsensitiveFileResolver
@@ -199,6 +201,7 @@ final class GameSession: NSObject, ObservableObject {
         loadError = nil
         contextLost = false
         bootDiagnostic = nil
+        isDiagnosticDismissed = false
         missingResources = []
         didStall = false
         sawReadySignal = false
@@ -221,6 +224,7 @@ final class GameSession: NSObject, ObservableObject {
         isLoading = true
         loadError = nil
         bootDiagnostic = nil
+        isDiagnosticDismissed = false
         missingResources = []
         didStall = false
         sawReadySignal = false
@@ -288,8 +292,7 @@ final class GameSession: NSObject, ObservableObject {
 
     /// Clears the on-screen diagnostic banner without touching the running game.
     func dismissDiagnostic() {
-        bootDiagnostic = nil
-        missingResources = []
+        isDiagnosticDismissed = true
         didStall = false
     }
 
@@ -481,9 +484,9 @@ final class GameSession: NSObject, ObservableObject {
         }
         Log.error("Game boot \(kind): \(text)")
 
-        // A stall report is only a hint; keep any concrete exception visible.
-        if kind == "stall", bootDiagnostic != nil { return }
+        // Always surface live diagnostic and stall updates, un-dismissing the top banner automatically
         bootDiagnostic = text
+        isDiagnosticDismissed = false
     }
 
     // MARK: - Native disk save bridge
@@ -756,6 +759,7 @@ extension GameSession: WKNavigationDelegate {
         Log.app("Web content process terminated; reloading \(game.folderName)")
         isLoading = true
         bootDiagnostic = nil
+        isDiagnosticDismissed = false
         missingResources = []
         didStall = false
         sawReadySignal = false

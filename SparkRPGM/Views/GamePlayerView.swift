@@ -85,7 +85,7 @@ struct GamePlayerView: View {
                     .zIndex(8)
             }
 
-            if let diagnostic = session.bootDiagnostic, !gameFailed, !session.isLoading {
+            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, !session.isLoading {
                 errorBanner(diagnostic)
                     .zIndex(15)
             }
@@ -419,7 +419,7 @@ struct GamePlayerView: View {
                     Text(message)
                         .font(.system(size: 10.5, design: .monospaced))
                         .foregroundColor(SparkTheme.textSecondary)
-                        .lineLimit(3)
+                        .lineLimit(10)
                         .fixedSize(horizontal: false, vertical: true)
 
                     if !session.missingResources.isEmpty {

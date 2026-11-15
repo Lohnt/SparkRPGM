@@ -43,6 +43,7 @@ struct GamePlayerView: View {
 
             if session.isLoading, game.engine.isWebBased || game.engine.isEasyRPG {
                 loadingOverlay
+                    .transition(.opacity.animation(.easeOut(duration: 0.35)))
                     .zIndex(20)
             }
 
@@ -681,15 +682,38 @@ struct GamePlayerView: View {
     }
 }
 
-/// Keeps the WKWebView creation inside `makeUIView` so it is only built once,
-/// and never during a SwiftUI body evaluation.
+/// Keeps the WKWebView creation inside `makeUIView` and tracks loaded URLs
+/// in Coordinator so that `@Published` state changes never restart the page mid-boot.
 struct WebViewHost: UIViewRepresentable {
 
     let session: GameSession
 
-    func makeUIView(context: Context) -> WKWebView {
-        session.makeWebViewIfNeeded()
+    final class Coordinator {
+        var loadedURL: URL?
+        var loadedGameID: String?
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let view = session.makeWebViewIfNeeded()
+        let target = session.targetURL
+        if context.coordinator.loadedURL != target || context.coordinator.loadedGameID != session.game.id {
+            context.coordinator.loadedURL = target
+            context.coordinator.loadedGameID = session.game.id
+            session.loadGame()
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        let target = session.targetURL
+        if context.coordinator.loadedURL != target || context.coordinator.loadedGameID != session.game.id {
+            context.coordinator.loadedURL = target
+            context.coordinator.loadedGameID = session.game.id
+            session.loadGame()
+        }
+    }
 }

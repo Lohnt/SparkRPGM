@@ -150,12 +150,71 @@
     } catch (error) {}
   }, true);
 
-  // MARK: - 1. Polyfill window.fetch over XMLHttpRequest for rpgm:// URLs
+  // MARK: - Native XMLHttpRequest status 0 patch for file:// URLs
+
+  (function patchXHRForFileScheme() {
+    if (typeof XMLHttpRequest === 'undefined') return;
+
+    var originalStatusDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'status');
+    var originalStatusTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'statusText');
+
+    Object.defineProperty(XMLHttpRequest.prototype, 'status', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        var rawStatus = 0;
+        try {
+          if (originalStatusDesc && originalStatusDesc.get) {
+            rawStatus = originalStatusDesc.get.call(this);
+          }
+        } catch (e) {}
+
+        // In WebKit file:// or custom scheme, successful requests report status 0.
+        // If readyState is DONE (4), treat status 0 with non-empty response as 200 OK.
+        if (rawStatus === 0 && this.readyState === 4) {
+          var hasContent = false;
+          try {
+            var rType = this.responseType;
+            if (rType === '' || rType === 'text') {
+              hasContent = typeof this.responseText === 'string' && this.responseText.length > 0;
+            } else if (rType === 'arraybuffer') {
+              hasContent = this.response && this.response.byteLength > 0;
+            } else if (rType === 'blob') {
+              hasContent = this.response && this.response.size > 0;
+            } else {
+              hasContent = this.response !== null && this.response !== undefined;
+            }
+          } catch (err) {}
+          if (hasContent) return 200;
+        }
+        return rawStatus;
+      }
+    });
+
+    Object.defineProperty(XMLHttpRequest.prototype, 'statusText', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        var rawText = '';
+        try {
+          if (originalStatusTextDesc && originalStatusTextDesc.get) {
+            rawText = originalStatusTextDesc.get.call(this);
+          }
+        } catch (e) {}
+        if ((!rawText || rawText === '') && this.status === 200) {
+          return 'OK';
+        }
+        return rawText;
+      }
+    });
+  })();
+
+  // MARK: - 1. Polyfill window.fetch over XMLHttpRequest for file:// and rpgm:// URLs
 
   (function polyfillFetch() {
     var originalFetch = window.fetch;
 
-    function isRpgmOrRelative(input) {
+    function isLocalOrRelative(input) {
       if (!input) return false;
       var urlStr = '';
       if (typeof input === 'string') {
@@ -164,7 +223,7 @@
         urlStr = String(input.url);
       }
       urlStr = urlStr.trim();
-      if (urlStr.indexOf('rpgm://') === 0) return true;
+      if (urlStr.indexOf('file://') === 0 || urlStr.indexOf('rpgm://') === 0) return true;
       if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(urlStr)) {
         return false;
       }
@@ -230,7 +289,7 @@
     }
 
     window.fetch = function (input, init) {
-      if (!isRpgmOrRelative(input)) {
+      if (!isLocalOrRelative(input)) {
         if (originalFetch) {
           return originalFetch.apply(window, arguments);
         }

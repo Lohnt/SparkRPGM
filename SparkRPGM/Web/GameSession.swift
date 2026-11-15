@@ -68,14 +68,36 @@ final class GameSession: NSObject, ObservableObject {
         AppPaths.ensureSaveFolder(forGame: game.folderName)
     }
 
-    /// The URL loaded into the main frame.
-    var entryURL: URL {
+    /// Resolves the actual index.html on disk for native file:// loading.
+    func resolveIndexURL() -> URL {
+        let fileManager = FileManager.default
+        let candidates: [URL] = [
+            game.entryFileURL,
+            game.engineRootURL.appendingPathComponent("index.html"),
+            game.rootURL.appendingPathComponent("index.html"),
+            game.rootURL.appendingPathComponent("www/index.html"),
+        ]
+        for url in candidates {
+            if fileManager.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return game.entryFileURL
+    }
+
+    /// The target URL loaded into the main frame.
+    var targetURL: URL {
         switch entry {
         case .gameIndex:
-            return context.entryURL
+            return resolveIndexURL()
         case .easyRPGHost:
             return context.easyRPGHostURL
         }
+    }
+
+    /// The URL loaded into the main frame.
+    var entryURL: URL {
+        targetURL
     }
 
     // MARK: - Setup
@@ -129,7 +151,6 @@ final class GameSession: NSObject, ObservableObject {
 
         webView = view
         didSetup = true
-        loadGame()
         return view
     }
 
@@ -181,9 +202,16 @@ final class GameSession: NSObject, ObservableObject {
         sawReadySignal = false
         armStallWatchdog()
         armLoadingSafetyGuard()
-        var request = URLRequest(url: entryURL)
-        request.cachePolicy = .reloadIgnoringLocalCacheData
-        webView.load(request)
+
+        switch entry {
+        case .easyRPGHost:
+            var request = URLRequest(url: targetURL)
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            webView.load(request)
+        case .gameIndex:
+            let indexURL = resolveIndexURL()
+            webView.loadFileURL(indexURL, allowingReadAccessTo: game.rootURL)
+        }
     }
 
     func reload() {
@@ -234,11 +262,13 @@ final class GameSession: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: item)
     }
 
-    private func markLoaded() {
+    func markLoaded() {
         loadingSafetyWorkItem?.cancel()
         loadingSafetyWorkItem = nil
         guard isLoading else { return }
-        isLoading = false
+        withAnimation(.easeOut(duration: 0.35)) {
+            isLoading = false
+        }
         if speedMultiplier > 1 { applySpeed() }
     }
 
@@ -678,10 +708,12 @@ extension GameSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if speedMultiplier > 1 { applySpeed() }
-        // Dismiss the native spinner for every engine. MZ/MV continue painting
-        // their own boot screen after `load`, and any script failure is now
-        // surfaced by the dismissible diagnostic banner, not a grey overlay.
+        // Dismiss the native loading overlay as soon as navigation completes
         markLoaded()
+        // Ensure that within 1.5s max fade-out the live canvas is completely visible
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.markLoaded()
+        }
         scheduleMissingEngineCheck()
     }
 
@@ -700,20 +732,20 @@ extension GameSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
-        loadError = error.localizedDescription
-        isLoading = false
+        let msg = "Navigation failed: \(error.localizedDescription)"
+        Log.error(msg)
+        bootDiagnostic = msg
+        markLoaded()
         clearStallWatchdog()
-        loadingSafetyWorkItem?.cancel()
-        loadingSafetyWorkItem = nil
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
-        loadError = error.localizedDescription
-        isLoading = false
+        let msg = "Could not open index.html: \(error.localizedDescription)"
+        Log.error(msg)
+        bootDiagnostic = msg
+        markLoaded()
         clearStallWatchdog()
-        loadingSafetyWorkItem?.cancel()
-        loadingSafetyWorkItem = nil
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -741,7 +773,7 @@ extension GameSession: WKNavigationDelegate {
         }
 
         switch url.scheme?.lowercased() {
-        case "rpgm", "about":
+        case "rpgm", "file", "about":
             decisionHandler(.allow)
         case "http", "https":
             UIApplication.shared.open(url, options: [:], completionHandler: nil)

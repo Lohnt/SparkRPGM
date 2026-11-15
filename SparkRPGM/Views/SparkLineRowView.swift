@@ -16,6 +16,7 @@ struct SparkLineRowView: View {
     var onRemoveCover: () -> Void
     var onChangeLineColor: () -> Void
     var onBackup: () -> Void
+    var onHide: () -> Void = {}
     var onDelete: () -> Void
 
     private var metadataLine: String {
@@ -78,6 +79,9 @@ struct SparkLineRowView: View {
             }
             Button(action: onBackup) {
                 Label("Backup Saves", systemImage: "externaldrive.badge.timemachine")
+            }
+            Button(action: onHide) {
+                Label("Hide Game", systemImage: "eye.slash")
             }
             Divider()
             Button(action: onDelete) {

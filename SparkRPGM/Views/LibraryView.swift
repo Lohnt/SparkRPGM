@@ -177,8 +177,14 @@ struct LibraryView: View {
     }
 
     private var subtitle: String {
-        let count = store.games.count
-        let gamesText = "\(count) game\(count == 1 ? "" : "s")"
+        let visibleCount = filteredGames.count
+        let totalCount = store.games.count
+        let gamesText: String
+        if !store.hiddenFolderNames.isEmpty {
+            gamesText = "\(visibleCount) game\(visibleCount == 1 ? "" : "s") (\(store.hiddenFolderNames.count) hidden)"
+        } else {
+            gamesText = "\(totalCount) game\(totalCount == 1 ? "" : "s")"
+        }
         if let free = DiskSpace.formattedAvailable(at: AppPaths.documents) {
             return "\(gamesText) · \(free) free"
         }
@@ -186,7 +192,8 @@ struct LibraryView: View {
     }
 
     private var ambientCoverURL: URL? {
-        let sorted = store.games.sorted {
+        let visible = store.games.filter { !store.isGameHidden($0) }
+        let sorted = visible.sorted {
             ($0.lastPlayed ?? .distantPast) > ($1.lastPlayed ?? .distantPast)
         }
         return sorted.first?.coverURL
@@ -343,6 +350,7 @@ struct LibraryView: View {
                     onRemoveCover: { store.removeCustomCover(for: game) },
                     onChangeLineColor: { route = .lineColor(game) },
                     onBackup: { backup(game) },
+                    onHide: { store.hideGame(game) },
                     onDelete: {
                         deleteTarget = game
                         showDeleteDialog = true
@@ -370,6 +378,7 @@ struct LibraryView: View {
                     onRemoveCover: { store.removeCustomCover(for: game) },
                     onChangeLineColor: { route = .lineColor(game) },
                     onBackup: { backup(game) },
+                    onHide: { store.hideGame(game) },
                     onDelete: {
                         deleteTarget = game
                         showDeleteDialog = true
@@ -505,7 +514,7 @@ struct LibraryView: View {
     // MARK: - Data
 
     private var filteredGames: [Game] {
-        var result = store.games
+        var result = store.games.filter { !store.isGameHidden($0) }
 
         if let engine = engineFilter {
             result = result.filter { $0.engine == engine }
@@ -558,6 +567,8 @@ struct LibraryView: View {
 
         case .customizeLauncher:
             LauncherCustomizationView()
+                .environmentObject(store)
+                .environmentObject(launcher)
         }
     }
 

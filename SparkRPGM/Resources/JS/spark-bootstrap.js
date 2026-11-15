@@ -100,6 +100,35 @@
   window.__sparkReportError = report;
   window.__sparkBrowserMode = true;
 
+  // MARK: - Gamepad Polyfill for iOS WKWebView file://
+
+  try {
+    if (typeof navigator !== 'undefined' && typeof navigator.getGamepads !== 'function') {
+      var emptyGamepads = function () { return []; };
+      try {
+        navigator.getGamepads = emptyGamepads;
+      } catch (e) {
+        try {
+          Object.defineProperty(navigator, 'getGamepads', {
+            configurable: true,
+            writable: true,
+            value: emptyGamepads
+          });
+        } catch (e2) {
+          if (typeof Navigator !== 'undefined' && Navigator.prototype) {
+            try {
+              Object.defineProperty(Navigator.prototype, 'getGamepads', {
+                configurable: true,
+                writable: true,
+                value: emptyGamepads
+              });
+            } catch (e3) {}
+          }
+        }
+      }
+    }
+  } catch (e) {}
+
   // MARK: - Boot Stage Telemetry
 
   var currentBootStage = 'Starting...';
@@ -131,14 +160,14 @@
       var name = err.name || 'Error';
       var message = err.message || '';
       var title = name + (message ? ': ' + message : '');
-      var stack = err.stack ? String(err.stack) : '';
+      var stack = err.stack ? String(err.stack).trim() : '';
       if (stack) {
         // JavaScriptCore on iOS omits the error name and message from stack.
         // Prepend "name: message" if not already present at the start.
-        if (stack.indexOf(title) !== 0 && stack.indexOf(message) === -1) {
-          return title + '\n' + stack;
+        if (stack.indexOf(title) === 0) {
+          return stack;
         }
-        return stack;
+        return title + '\n' + stack;
       }
       return title;
     }
@@ -949,7 +978,24 @@
       }
 
       wrapDataManagerGlobalInfo(dm);
+      wrapDataManagerCreateGameObjects(dm);
     } catch (e) {}
+  }
+
+  function wrapDataManagerCreateGameObjects(dm) {
+    if (!dm || typeof dm.createGameObjects !== 'function' || dm.createGameObjects.__sparkWrapped) return;
+    var orig = dm.createGameObjects;
+    var wrapped = function () {
+      try {
+        return orig.apply(this, arguments);
+      } catch (e) {
+        var formatted = formatError(e);
+        report('engine.error', formatted, '', 0);
+        throw e;
+      }
+    };
+    wrapped.__sparkWrapped = true;
+    dm.createGameObjects = wrapped;
   }
 
   // MARK: - Late StorageManager & DataManager.loadGlobalInfo Wrappers
@@ -1059,6 +1105,7 @@
         patchDataManagerInstance(dm);
       }
       wrapDataManagerGlobalInfo(dm);
+      wrapDataManagerCreateGameObjects(dm);
     }
   }
 
@@ -1469,6 +1516,12 @@
           if (curName === 'Scene_Boot') {
             report('info', 'Watchdog force-advancing Scene_Boot -> Scene_Title', '', 0);
             try {
+              if (typeof currentScene.resizeScreen === 'function') {
+                try { currentScene.resizeScreen(); } catch (e) {}
+              }
+              if (typeof currentScene.updateDocumentTitle === 'function') {
+                try { currentScene.updateDocumentTitle(); } catch (e) {}
+              }
               if (typeof currentScene.start === 'function') {
                 currentScene.start();
               }

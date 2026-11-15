@@ -167,6 +167,7 @@ struct GameCardView: View {
     var onRemoveCover: () -> Void
     var onChangeLineColor: () -> Void
     var onBackup: () -> Void
+    var onHide: () -> Void = {}
     var onDelete: () -> Void
 
     private var cornerRadius: CGFloat {
@@ -260,6 +261,9 @@ struct GameCardView: View {
             }
             Button(action: onBackup) {
                 Label("Backup Saves", systemImage: "externaldrive.badge.timemachine")
+            }
+            Button(action: onHide) {
+                Label("Hide Game", systemImage: "eye.slash")
             }
             Divider()
             Button(action: onDelete) {

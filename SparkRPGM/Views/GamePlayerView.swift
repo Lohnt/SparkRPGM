@@ -291,37 +291,53 @@ struct GamePlayerView: View {
 
     @ViewBuilder
     private func errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
+        let parsed = parseErrorMessage(message: message, detail: detail)
+
         ZStack {
             SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
 
-            VStack(spacing: 13) {
+            VStack(spacing: 14) {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundColor(SparkTheme.textSecondary)
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundColor(Color.orange.opacity(0.9))
 
                 Text("The game could not start")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(SparkTheme.textPrimary)
 
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundColor(SparkTheme.textSecondary)
+                Text(parsed.headline)
+                    .font(.system(size: 12.5, weight: .semibold, design: .monospaced))
+                    .foregroundColor(SparkTheme.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 30)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.red.opacity(0.18))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(Color.red.opacity(0.4), lineWidth: 1)
+                            )
+                    )
+                    .padding(.horizontal, 24)
 
-                if let detail = detail, !detail.isEmpty {
+                if let trace = parsed.trace, !trace.isEmpty {
                     ScrollView {
-                        Text(detail)
+                        Text(trace)
                             .font(.system(size: 9.5, design: .monospaced))
-                            .foregroundColor(SparkTheme.textTertiary)
+                            .foregroundColor(SparkTheme.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(9)
                     }
-                    .frame(maxWidth: 320, maxHeight: 120)
+                    .frame(maxWidth: 360, maxHeight: 130)
                     .background(Color.white.opacity(0.04))
                     .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .padding(.horizontal, 26)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
+                    )
+                    .padding(.horizontal, 24)
                 }
 
                 HStack(spacing: 10) {
@@ -341,6 +357,23 @@ struct GamePlayerView: View {
                 }
             }
         }
+    }
+
+    private func parseErrorMessage(message: String, detail: String?) -> (headline: String, trace: String?) {
+        let lines = message.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let headline = lines.first ?? message
+        var traceParts: [String] = []
+        if lines.count > 1 {
+            traceParts.append(lines.dropFirst().joined(separator: "\n"))
+        }
+        if let d = detail, !d.isEmpty {
+            let filteredDetail = d.replacingOccurrences(of: message, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !filteredDetail.isEmpty && !traceParts.contains(filteredDetail) {
+                traceParts.append(filteredDetail)
+            }
+        }
+        let trace = traceParts.isEmpty ? nil : traceParts.joined(separator: "\n\n")
+        return (headline, trace)
     }
 
     private func overlayButton(_ title: String, highlighted: Bool, action: @escaping () -> Void) -> some View {

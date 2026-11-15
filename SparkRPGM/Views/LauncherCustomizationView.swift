@@ -31,7 +31,7 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
             return ["library", "style", "lines", "prism", "grid", "card", "size", "sort",
                     "engine", "line", "colour", "color", "name", "title"]
         case .storage:
-            return ["storage", "space", "disk", "size", "reset", "appearance", "backups", "saves"]
+            return ["storage", "space", "disk", "size", "reset", "appearance", "backups", "saves", "hide", "hidden"]
         }
     }
 
@@ -48,11 +48,20 @@ private struct StorageRow: Identifiable {
     let detail: String
 }
 
+private struct HiddenGameItem: Identifiable {
+    let id: String
+    let folderName: String
+    let title: String
+    let engine: String
+    let formattedSize: String
+}
+
 // MARK: - Settings modal
 
 struct LauncherCustomizationView: View {
 
     @EnvironmentObject private var launcher: LauncherSettingsStore
+    @EnvironmentObject private var store: GameStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var section: SettingsSection = .appearance
@@ -76,6 +85,30 @@ struct LauncherCustomizationView: View {
 
     private var displayedSections: [SettingsSection] {
         query.isEmpty ? [section] : visibleSections
+    }
+
+    private var hiddenGameItems: [HiddenGameItem] {
+        store.hiddenFolderNames.sorted().map { folderName in
+            if let game = store.games.first(where: { $0.folderName == folderName }) {
+                return HiddenGameItem(
+                    id: folderName,
+                    folderName: folderName,
+                    title: game.title,
+                    engine: game.engine.rawValue,
+                    formattedSize: game.formattedSize
+                )
+            } else {
+                let size = AppPaths.size(of: AppPaths.gameFolder(named: folderName))
+                let sizeStr = size > 0 ? ByteCountFormatter.string(fromByteCount: size, countStyle: .file) : "—"
+                return HiddenGameItem(
+                    id: folderName,
+                    folderName: folderName,
+                    title: GameNames.cleanedTitle(folderName),
+                    engine: "RPG Maker",
+                    formattedSize: sizeStr
+                )
+            }
+        }
     }
 
     var body: some View {
@@ -603,6 +636,82 @@ struct LauncherCustomizationView: View {
                             .foregroundColor(SparkTheme.textTertiary)
                     }
                     .padding(.vertical, 3)
+                }
+            }
+
+            group("HIDDEN GAMES") {
+                let items = hiddenGameItems
+                if items.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 12))
+                            .foregroundColor(SparkTheme.textTertiary)
+                        Text("No hidden games")
+                            .font(.system(size: 13))
+                            .foregroundColor(SparkTheme.textTertiary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 3)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(items) { item in
+                            HStack(spacing: 10) {
+                                Image(systemName: "eye.slash")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(SparkTheme.textSecondary)
+                                    .frame(width: 18)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.title)
+                                        .font(.system(size: 13, weight: .medium))
+                                        .foregroundColor(SparkTheme.textPrimary)
+                                        .lineLimit(1)
+
+                                    HStack(spacing: 6) {
+                                        Text(item.engine)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(SparkTheme.textTertiary)
+                                        if !item.formattedSize.isEmpty && item.formattedSize != "—" {
+                                            Text("•")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(SparkTheme.textTertiary)
+                                            Text(item.formattedSize)
+                                                .font(.system(size: 10, design: .monospaced))
+                                                .foregroundColor(SparkTheme.textTertiary)
+                                        }
+                                    }
+                                }
+
+                                Spacer(minLength: 8)
+
+                                Button {
+                                    withAnimation(.easeOut(duration: 0.18)) {
+                                        store.unhideGame(folderName: item.folderName)
+                                    }
+                                } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "eye")
+                                            .font(.system(size: 11, weight: .medium))
+                                        Text("Restore")
+                                            .font(.system(size: 12, weight: .medium))
+                                    }
+                                    .foregroundColor(accent)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 5)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .fill(accent.opacity(0.12))
+                                    )
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                            .padding(.vertical, 3)
+
+                            if item.id != items.last?.id {
+                                Divider().background(SparkTheme.hairline)
+                            }
+                        }
+                    }
                 }
             }
 

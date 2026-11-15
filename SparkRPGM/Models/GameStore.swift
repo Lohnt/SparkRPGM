@@ -4,7 +4,10 @@ import UIKit
 /// The library model. Owns scanning, renaming, deleting, covers and metadata.
 final class GameStore: ObservableObject {
 
+    private static let hiddenGamesDefaultsKey = "sparkrpgm.hiddenGames.v1"
+
     @Published private(set) var games: [Game] = []
+    @Published private(set) var hiddenFolderNames: Set<String> = []
     @Published private(set) var isScanning = false
     @Published var errorMessage: String?
     @Published var toastMessage: String?
@@ -17,6 +20,9 @@ final class GameStore: ObservableObject {
 
     init(metadata: MetadataStore = .shared) {
         self.metadata = metadata
+        if let stored = UserDefaults.standard.array(forKey: Self.hiddenGamesDefaultsKey) as? [String] {
+            self.hiddenFolderNames = Set(stored)
+        }
     }
 
     // MARK: - Scanning
@@ -216,6 +222,11 @@ final class GameStore: ObservableObject {
             value.customTitle = true
         }
 
+        if hiddenFolderNames.remove(game.folderName) != nil {
+            hiddenFolderNames.insert(folderName)
+            persistHiddenGames()
+        }
+
         toast("Renamed to \(folderName)")
         scan()
         return folderName
@@ -237,7 +248,40 @@ final class GameStore: ObservableObject {
         GameCoverFinder.clear(forGame: game.folderName)
         metadata.remove(game.folderName)
         games.removeAll { $0.folderName == game.folderName }
+        if hiddenFolderNames.remove(game.folderName) != nil {
+            persistHiddenGames()
+        }
         toast("Deleted \(game.title)")
+    }
+
+    // MARK: - Hidden Games
+
+    var hiddenGames: [Game] {
+        games.filter { hiddenFolderNames.contains($0.folderName) }
+    }
+
+    func isGameHidden(_ game: Game) -> Bool {
+        hiddenFolderNames.contains(game.folderName)
+    }
+
+    func hideGame(_ game: Game) {
+        hiddenFolderNames.insert(game.folderName)
+        persistHiddenGames()
+        toast("Hidden \(game.title)")
+    }
+
+    func unhideGame(folderName: String) {
+        hiddenFolderNames.remove(folderName)
+        persistHiddenGames()
+        if let game = games.first(where: { $0.folderName == folderName }) {
+            toast("Restored \(game.title)")
+        } else {
+            toast("Restored game")
+        }
+    }
+
+    private func persistHiddenGames() {
+        UserDefaults.standard.set(Array(hiddenFolderNames), forKey: Self.hiddenGamesDefaultsKey)
     }
 
     func setCustomCover(_ image: UIImage, for game: Game) throws {

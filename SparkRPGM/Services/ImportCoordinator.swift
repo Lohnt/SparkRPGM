@@ -216,7 +216,7 @@ final class ImportCoordinator: ObservableObject {
     /// (plus guaranteed delivery for completion/terminal stages) so SwiftUI does
     /// not re-render thousands of times during extraction.
     private func deliver(_ update: ArchiveExtractor.Progress, jobID: UUID) {
-        let isFinal = update.phase == .imported || update.fraction == 1.0 || (update.completedFiles != nil && update.completedFiles == update.totalFiles)
+        let isFinal = update.phase == .finishing || (update.fraction ?? 0) >= 1.0 || (update.totalFiles > 0 && update.completedFiles == update.totalFiles)
         let now = CFAbsoluteTimeGetCurrent()
         let last = lastDeliveryTimes[jobID] ?? 0
         if !isFinal && (now - last < 0.1) {

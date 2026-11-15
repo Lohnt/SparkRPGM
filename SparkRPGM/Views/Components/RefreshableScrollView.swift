@@ -57,7 +57,7 @@ struct RefreshableScrollView<Content: View>: View {
                 }
             }
             .padding(.top, 8)
-            .animation(.easeOut(duration: 0.2)),
+            .animation(.easeOut(duration: 0.2), value: isRefreshing),
             alignment: .top
         )
     }

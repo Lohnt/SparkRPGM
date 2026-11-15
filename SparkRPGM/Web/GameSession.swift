@@ -115,10 +115,11 @@ final class GameSession: NSObject, ObservableObject {
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         configuration.preferences.javaScriptEnabled = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        // File access only matters for file:// probes some plugins perform.
-        // The setter is private on iOS, so apply it through guarded KVC and
-        // ignore the key entirely where the class does not expose it.
+        // Enable local file access and universal access for file:// XHR/fetch
+        configuration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        configuration.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
         sparkSetIfAvailable(configuration.preferences, key: "allowFileAccessFromFileURLs", value: true)
+        sparkSetIfAvailable(configuration, key: "allowUniversalAccessFromFileURLs", value: true)
         sparkSetIfAvailable(configuration.preferences, key: "allowUniversalAccessFromFileURLs", value: true)
 
         let controller = configuration.userContentController
@@ -883,7 +884,11 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
 /// private WebKit key can never raise an Objective-C exception.
 private func sparkSetIfAvailable(_ object: NSObject, key: String, value: Any) {
     let suffix = key.prefix(1).uppercased() + key.dropFirst()
-    let selector = NSSelectorFromString("set\(suffix):")
-    guard object.responds(to: selector) else { return }
-    object.setValue(value, forKey: key)
+    let selectors = [
+        NSSelectorFromString("set\(suffix):"),
+        NSSelectorFromString("_set\(suffix):")
+    ]
+    if selectors.contains(where: { object.responds(to: $0) }) {
+        object.setValue(value, forKey: key)
+    }
 }

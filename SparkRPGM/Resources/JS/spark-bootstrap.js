@@ -155,8 +155,54 @@
   (function patchXHRForFileScheme() {
     if (typeof XMLHttpRequest === 'undefined') return;
 
+    var originalOpen = XMLHttpRequest.prototype.open;
+    var originalSend = XMLHttpRequest.prototype.send;
     var originalStatusDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'status');
     var originalStatusTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'statusText');
+
+    XMLHttpRequest.prototype.open = function (method, url, async, user, password) {
+      this._sparkMethod = method || 'GET';
+      this._sparkRawUrl = url;
+      this._sparkFailed = false;
+
+      var resolvedUrl = url;
+      try {
+        if (typeof url === 'string') {
+          // If relative path under file:// or rpgm://, resolve cleanly against baseURI / location.href
+          if (url.indexOf('://') === -1) {
+            var base = document.baseURI || window.location.href;
+            resolvedUrl = new URL(url, base).href;
+          }
+        }
+      } catch (e) {
+        resolvedUrl = url;
+      }
+      this._sparkResolvedUrl = resolvedUrl;
+
+      var isAsync = async === undefined ? true : !!async;
+      return originalOpen.call(this, method, resolvedUrl, isAsync, user, password);
+    };
+
+    XMLHttpRequest.prototype.send = function (body) {
+      var self = this;
+      var targetUrl = self._sparkResolvedUrl || self._sparkRawUrl || '';
+
+      self.addEventListener('error', function () {
+        self._sparkFailed = true;
+        report('resource', 'Failed to load: ' + targetUrl, targetUrl, 0, {
+          method: self._sparkMethod,
+          url: targetUrl
+        });
+      }, false);
+
+      try {
+        return originalSend.apply(this, arguments);
+      } catch (err) {
+        self._sparkFailed = true;
+        report('resource', 'Failed to load: ' + targetUrl + ' (' + (err.message || err) + ')', targetUrl, 0);
+        throw err;
+      }
+    };
 
     Object.defineProperty(XMLHttpRequest.prototype, 'status', {
       configurable: true,
@@ -171,7 +217,7 @@
 
         // In WebKit file:// or custom scheme, successful requests report status 0.
         // If readyState is DONE (4), treat status 0 with non-empty response as 200 OK.
-        if (rawStatus === 0 && this.readyState === 4) {
+        if (rawStatus === 0 && this.readyState === 4 && !this._sparkFailed) {
           var hasContent = false;
           try {
             var rType = this.responseType;
@@ -181,6 +227,10 @@
               hasContent = this.response && this.response.byteLength > 0;
             } else if (rType === 'blob') {
               hasContent = this.response && this.response.size > 0;
+            } else if (rType === 'json') {
+              hasContent = this.response !== null && this.response !== undefined;
+            } else if (rType === 'document') {
+              hasContent = this.responseXML !== null && this.responseXML !== undefined;
             } else {
               hasContent = this.response !== null && this.response !== undefined;
             }
@@ -559,33 +609,158 @@
     }, 40);
   })();
 
-  // MARK: - 3. Force browser mode in MV / MZ
+  // MARK: - 3. Property Setter Traps (Utils, DataManager, Graphics)
 
-  var patchedUtils = false;
-  var utilsAttempts = 0;
-
-  function patchUtils() {
-    var utils = window.Utils;
-    if (!utils || (typeof utils !== 'object' && typeof utils !== 'function')) return false;
-    if (patchedUtils) return true;
+  // Utils trap: force isNwjs() = false and browser mode
+  var _realUtils = window.Utils;
+  function patchUtilsInstance(utils) {
+    if (!utils || (typeof utils !== 'object' && typeof utils !== 'function')) return;
     try {
       utils.isNwjs = function () { return false; };
+      utils.isOptionValid = function (name) {
+        if (name === 'test' || name === 'btest') return false;
+        return false;
+      };
       utils.__sparkBrowserMode = true;
-      patchedUtils = true;
-      return true;
-    } catch (error) {
-      return false;
-    }
+    } catch (e) {}
   }
 
-  if (!patchUtils()) {
-    var utilsTimer = setInterval(function () {
-      utilsAttempts += 1;
-      if (patchUtils() || utilsAttempts >= 600) {
-        clearInterval(utilsTimer);
-      }
-    }, 40);
+  if (_realUtils) {
+    patchUtilsInstance(_realUtils);
   }
+
+  try {
+    Object.defineProperty(window, 'Utils', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return _realUtils;
+      },
+      set: function (val) {
+        _realUtils = val;
+        patchUtilsInstance(val);
+      }
+    });
+  } catch (e) {
+    window.Utils = _realUtils;
+  }
+
+  // DataManager trap: intercept onXhrError and onError to report exact missing file
+  var _realDataManager = window.DataManager;
+  function patchDataManagerInstance(dm) {
+    if (!dm || (typeof dm !== 'object' && typeof dm !== 'function')) return;
+    try {
+      if (dm.__sparkPatched) return;
+      dm.__sparkPatched = true;
+
+      // Wrap onXhrError (MZ)
+      var origOnXhrError = dm.onXhrError;
+      dm.onXhrError = function (name, src, url) {
+        var failedUrl = url || ('data/' + src);
+        report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
+          dataName: name,
+          src: src
+        });
+        if (origOnXhrError) {
+          return origOnXhrError.apply(this, arguments);
+        }
+      };
+
+      // Wrap onError (MV)
+      var origOnError = dm.onError;
+      dm.onError = function (name, src) {
+        var failedUrl = 'data/' + src;
+        report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
+          dataName: name,
+          src: src
+        });
+        if (origOnError) {
+          try {
+            return origOnError.apply(this, arguments);
+          } catch (e) {
+            var msg = e && e.message ? e.message : String(e);
+            if (msg.indexOf('Your browser does not allow to read local files') !== -1) {
+              throw new Error('Failed to load: ' + failedUrl);
+            }
+            throw e;
+          }
+        } else {
+          throw new Error('Failed to load: ' + failedUrl);
+        }
+      };
+    } catch (e) {}
+  }
+
+  if (_realDataManager) {
+    patchDataManagerInstance(_realDataManager);
+  }
+
+  try {
+    Object.defineProperty(window, 'DataManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return _realDataManager;
+      },
+      set: function (val) {
+        _realDataManager = val;
+        patchDataManagerInstance(val);
+      }
+    });
+  } catch (e) {
+    window.DataManager = _realDataManager;
+  }
+
+  // Graphics trap: intercept printError to report engine errors to Swift
+  var _realGraphics = window.Graphics;
+  function patchGraphicsInstance(gfx) {
+    if (!gfx || (typeof gfx !== 'object' && typeof gfx !== 'function')) return;
+    try {
+      if (gfx.__sparkPatched) return;
+      gfx.__sparkPatched = true;
+
+      var origPrintError = gfx.printError;
+      gfx.printError = function (name, message) {
+        var detail = (name ? name + ': ' : '') + (message || '');
+        report('graphics.error', detail, '', 0);
+        if (origPrintError) {
+          return origPrintError.apply(this, arguments);
+        }
+      };
+    } catch (e) {}
+  }
+
+  if (_realGraphics) {
+    patchGraphicsInstance(_realGraphics);
+  }
+
+  try {
+    Object.defineProperty(window, 'Graphics', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return _realGraphics;
+      },
+      set: function (val) {
+        _realGraphics = val;
+        patchGraphicsInstance(val);
+      }
+    });
+  } catch (e) {
+    window.Graphics = _realGraphics;
+  }
+
+  // Continuous fallback poller in case static classes are reassigned or defined late
+  var enginePollAttempts = 0;
+  var enginePollTimer = setInterval(function () {
+    enginePollAttempts += 1;
+    if (window.Utils) patchUtilsInstance(window.Utils);
+    if (window.DataManager) patchDataManagerInstance(window.DataManager);
+    if (window.Graphics) patchGraphicsInstance(window.Graphics);
+    if (enginePollAttempts >= 600) {
+      clearInterval(enginePollTimer);
+    }
+  }, 40);
 
   // MARK: - WebAssembly guard & Effekseer milestone
 

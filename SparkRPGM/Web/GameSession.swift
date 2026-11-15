@@ -1,6 +1,7 @@
 import Foundation
 import WebKit
 import UIKit
+import SwiftUI
 
 /// Owns one WKWebView plus its scheme handler and message bridge.
 final class GameSession: NSObject, ObservableObject {

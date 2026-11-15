@@ -24,22 +24,75 @@ struct CoverImageView: View {
     var maxPixel: CGFloat = 900
 
     @State private var image: UIImage?
+    @State private var isSmallArtwork = false
 
     var body: some View {
         ZStack {
+            // Exact art-board colour, also the base behind every cover so a
+            // transparent PNG never shows the card's blur through it.
+            Color(hex: "#1A1A20")
+
             if let image = image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
+                if isSmallArtwork {
+                    smallArtwork(image)
+                } else {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
             } else {
                 fallback
             }
         }
+        .clipped()
         .onAppear(perform: load)
         .onChange(of: game.coverURL) { _ in
             image = nil
+            isSmallArtwork = false
             load()
         }
+    }
+
+    /// A 32×32 plugin icon must never be stretched across a 300pt card.
+    /// Render it at crisp 48pt inside a dark, lightly gridded art board.
+    private func smallArtwork(_ image: UIImage) -> some View {
+        ZStack {
+            gridPattern
+
+            Image(uiImage: image)
+                .resizable()
+                .interpolation(.none)
+                .frame(width: 48, height: 48)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                )
+        }
+    }
+
+    private var gridPattern: some View {
+        GeometryReader { proxy in
+            Path { path in
+                let step: CGFloat = 24
+
+                var x: CGFloat = 0
+                while x <= proxy.size.width {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                    x += step
+                }
+
+                var y: CGFloat = 0
+                while y <= proxy.size.height {
+                    path.move(to: CGPoint(x: 0, y: y))
+                    path.addLine(to: CGPoint(x: proxy.size.width, y: y))
+                    y += step
+                }
+            }
+            .stroke(Color.white.opacity(0.035), lineWidth: 0.5)
+        }
+        .allowsHitTesting(false)
     }
 
     private var fallback: some View {
@@ -86,13 +139,19 @@ struct CoverImageView: View {
     private func load() {
         guard let url = game.coverURL else { return }
         if let cached = ThumbnailCache.shared.cachedImage(for: url, maxPixel: maxPixel) {
-            image = cached
+            apply(cached)
             return
         }
         ThumbnailCache.shared.image(for: url, maxPixel: maxPixel) { loaded in
             guard let loaded = loaded else { return }
-            image = loaded
+            apply(loaded)
         }
+    }
+
+    private func apply(_ loaded: UIImage) {
+        let pixels = max(loaded.size.width, loaded.size.height) * loaded.scale
+        isSmallArtwork = pixels > 0 && pixels < 96
+        image = loaded
     }
 }
 
@@ -167,6 +226,8 @@ struct GameCardView: View {
             .padding(cardSize == .compact ? 9 : 12)
         }
         .aspectRatio(cardSize.coverAspect, contentMode: .fit)
+        .frame(maxWidth: .infinity)
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .sparkBorder(cornerRadius: cornerRadius)
         .overlay(alignment: .topLeading) {

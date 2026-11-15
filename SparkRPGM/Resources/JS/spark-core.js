@@ -50,6 +50,29 @@
     });
   };
 
+  /// Readiness signal the native overlay also listens for. Unlike `ready` it
+  /// carries whether an engine object exists, so the banner can explain a
+  /// page that loaded but never booted an RPG Maker runtime.
+  Spark.gameReadySent = false;
+
+  Spark.gameReady = function (reason, hasEngine) {
+    if (Spark.gameReadySent) return;
+    Spark.gameReadySent = true;
+
+    var engineObject = typeof hasEngine === 'boolean' ? hasEngine : !!(
+      window.SceneManager || window.Graphics ||
+      window.Game_Interpreter || window.Game_Player
+    );
+
+    Spark.post('gameReady', {
+      reason: reason || 'engine',
+      engine: cfg.engine || 'unknown',
+      title: cfg.gameTitle || '',
+      hasEngine: engineObject
+    });
+    Spark.ready(reason || 'engine');
+  };
+
   // MARK: - Device pixel ratio guard
 
   try {
@@ -168,7 +191,10 @@
 
     if (engineReady) {
       clearInterval(engineTimer);
-      setTimeout(function () { Spark.ready('engine'); }, 240);
+      setTimeout(function () {
+        Spark.ready('engine');
+        Spark.gameReady('engine', true);
+      }, 240);
       return;
     }
 
@@ -195,9 +221,33 @@
 
   window.addEventListener('load', function () {
     setTimeout(function () {
-      if (window.SceneManager || window.Graphics) Spark.ready('load');
+      var hasEngine = !!(
+        window.SceneManager || window.Graphics ||
+        window.Game_Interpreter || window.Game_Player
+      );
+      // Always answer the native spinner. A document that loaded but never
+      // produced an engine is reported with `hasEngine: false` so the banner
+      // can name the real problem instead of showing a grey screen.
+      Spark.gameReady('window-load', hasEngine);
     }, 400);
   }, false);
+
+  // MZ defines `SceneManager` before `Scene_Boot` finishes, so the presence of
+  // the object alone is not enough. Watch for the first real scene: that is
+  // when the game loop is actually running.
+  var sceneAttempts = 0;
+  var sceneTimer = setInterval(function () {
+    sceneAttempts += 1;
+    var manager = window.SceneManager;
+    if (manager && (manager._scene || manager._nextScene)) {
+      clearInterval(sceneTimer);
+      Spark.gameReady('scene', true);
+      return;
+    }
+    if (sceneAttempts >= 240) {
+      clearInterval(sceneTimer);
+    }
+  }, 250);
 
   // Public helper used by the EasyRPG host page and by future runtimes.
   window.__sparkReady = function (reason) {

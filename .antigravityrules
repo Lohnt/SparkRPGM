@@ -1,0 +1,12 @@
+# SparkRPGM Project Rules
+- Target: iPad 9th Gen on iPadOS 15.6.1 (3 GB RAM).
+- Deployment: Unsigned .ipa installed via TrollStore (built via GitHub Actions).
+- Deployment Target: iOS 15.0 minimum.
+- Hard API Restrictions: Strictly NO iOS 16+ or iOS 26 APIs (e.g. NavigationStack,
+  .scrollContentBackground, .presentationDetents, .safeAreaInset, .foregroundStyle,
+  ShareLink, AsyncImage, @Observable, View.tracking, .glassEffect()).
+- Memory Budget: 3 GB device RAM. Keep file operations strictly in standard
+  Documents / tmp paths with low memory overhead. Avoid large memory buffers.
+- Stability: Do NOT rewrite working DocumentPicker, ArchiveExtractor, or
+  RPGMSchemeHandler unless explicitly requested.
+- Git Identity: Always run `git config user.email "140104071+Lohnt@users.noreply.github.com"`.

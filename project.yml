@@ -66,35 +66,6 @@ targets:
       - path: SparkRPGM/Resources/WebRuntime
         type: folder
         buildPhase: resources
-    postBuildScripts:
-      - name: Flatten alternate app icons into the bundle root
-        shell: /bin/bash
-        basedOnDependencyAnalysis: false
-        script: |
-          set -euo pipefail
-          SRC="$SRCROOT/SparkRPGM/Resources/IconAssets"
-          DEST="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
-          if [ ! -d "$SRC" ]; then
-            echo "error: $SRC is missing. Run scripts/generate_icons.py before building."
-            exit 1
-          fi
-          mkdir -p "$DEST"
-          copied=0
-          for icon in "$SRC"/*.png; do
-            [ -e "$icon" ] || continue
-            cp -f "$icon" "$DEST/$(basename "$icon")"
-            copied=$((copied + 1))
-          done
-          if [ "$copied" -lt 10 ]; then
-            echo "error: expected at least 10 icon PNGs in $SRC, copied $copied."
-            exit 1
-          fi
-          # CFBundleIconFiles resolves these from the .app root, never from a
-          # nested folder, which is what caused OSStatus error -54.
-          test -f "$DEST/Editor@2x.png"
-          test -f "$DEST/Editor-83.5@2x~ipad.png"
-          test -f "$DEST/Y2KDisc@2x.png"
-          echo "Flattened $copied alternate icon PNGs into $DEST"
     dependencies:
       - package: ZIPFoundation
         product: ZIPFoundation
@@ -109,7 +80,6 @@ targets:
         INFOPLIST_FILE: SparkRPGM/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: "YES"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         IPHONEOS_DEPLOYMENT_TARGET: "15.0"
         MARKETING_VERSION: "1.0.0"

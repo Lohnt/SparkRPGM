@@ -52,20 +52,19 @@ jobs:
           restore-keys: |
             spm-${{ runner.os }}-
 
-      - name: Generate app icons (Pillow)
+      - name: Generate app icon (Pillow)
         run: |
           python3 -m venv "$RUNNER_TEMP/iconvenv"
           . "$RUNNER_TEMP/iconvenv/bin/activate"
           python -m pip install --upgrade pip
           python -m pip install pillow
-          rm -rf SparkRPGM/Resources/IconAssets
+          rm -rf SparkRPGM/Resources/IconAssets SparkRPGM/Resources/IconPreviews
           python scripts/generate_icons.py --repo-root "$GITHUB_WORKSPACE"
-          test -f SparkRPGM/Resources/IconAssets/AppIcon@2x.png
-          test -f SparkRPGM/Resources/IconAssets/Editor@2x.png
-          test -f SparkRPGM/Resources/IconAssets/Y2KDisc-83.5@2x.png
-          test -f SparkRPGM/Resources/IconAssets/Orbit-83.5@2x~ipad.png
-          test -f SparkRPGM/Resources/IconPreviews/PreviewBlueprint.png
-          ls -la SparkRPGM/Resources/IconAssets | head -20
+          test -f SparkRPGM/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-iphone-60x60@3x.png
+          test -f SparkRPGM/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-ipad-83.5x83.5@2x.png
+          test -f SparkRPGM/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-ios-marketing-1024x1024@1x.png
+          test ! -d SparkRPGM/Resources/IconPreviews
+          ls -la SparkRPGM/Resources/Assets.xcassets/AppIcon.appiconset | head -20
 
       - name: Fetch ogv.js 1.8.9 runtime
         run: |
@@ -154,29 +153,35 @@ jobs:
           ls -lh "$TARGET.ipa"
           unzip -l "$TARGET.ipa" | head -40
 
-      - name: Verify alternate icons sit at the app bundle root
+      - name: Verify single app icon
         run: |
           set -euo pipefail
-          CHECK="$RUNNER_TEMP/ipa-icon-check"
-          rm -rf "$CHECK"
-          mkdir -p "$CHECK"
-          unzip -q "$GITHUB_WORKSPACE/$TARGET.ipa" -d "$CHECK"
-          APP="$CHECK/Payload/$TARGET.app"
+          APP="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/$TARGET.app"
           if [ ! -d "$APP" ]; then
-            echo "App bundle missing from the IPA at $APP"
+            echo "App bundle missing at $APP"
             exit 1
           fi
-          test -f "$APP/AppIcon@2x.png"
-          test -f "$APP/Editor@2x.png"
-          test -f "$APP/Orbit@2x.png"
-          test -f "$APP/Orbit-83.5@2x~ipad.png"
-          test -f "$APP/Y2KDisc@2x~ipad.png"
+          python3 - "$APP/Info.plist" <<'PY'
+          import plistlib
+          import sys
+
+          with open(sys.argv[1], "rb") as fh:
+              info = plistlib.load(fh)
+
+          icons = info.get("CFBundleIcons") or {}
+          primary = icons.get("CFBundlePrimaryIcon") or {}
+          alternates = icons.get("CFBundleAlternateIcons") or {}
+
+          if alternates:
+              raise SystemExit("error: alternate app icons must not ship (TrollStore rejects them)")
+          if not primary:
+              raise SystemExit("error: CFBundlePrimaryIcon is missing from the built app")
+          print("primary app icon:", primary.get("CFBundleIconName") or primary.get("CFBundleIconFiles"))
+          PY
           if [ -d "$APP/IconAssets" ]; then
-            echo "error: IconAssets must be flattened into the .app root"
+            echo "error: loose icon assets must not ship inside the app"
             exit 1
           fi
-          echo "--- alternate icons at bundle root ---"
-          ls "$APP" | grep -E '^(AppIcon|(Editor|Orbit|Y2KDisc|Vinyl|Cosmos|Amethyst|Cassette|Invincible|Blueprint))' | sort | head -30
 
       - name: Write build summary
         if: always()

@@ -57,9 +57,11 @@ struct LibraryView: View {
                     }
                     .padding(.bottom, 110)
                 }
+                .background(Color.clear)
 
                 importBanner
             }
+            .background(Color.clear)
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -314,7 +316,17 @@ struct LibraryView: View {
 
     private var prismGrid: some View {
         LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: launcher.settings.cardSize.minimumWidth), spacing: 14)],
+            columns: [
+                GridItem(
+                    .adaptive(
+                        minimum: launcher.settings.cardSize.minimumWidth,
+                        maximum: launcher.settings.cardSize.minimumWidth * 1.8
+                    ),
+                    spacing: 14,
+                    alignment: .top
+                )
+            ],
+            alignment: .leading,
             spacing: 16
         ) {
             ForEach(filteredGames) { game in
@@ -336,9 +348,11 @@ struct LibraryView: View {
                         showDeleteDialog = true
                     }
                 )
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var sparkLines: some View {
@@ -461,9 +475,8 @@ struct LibraryView: View {
     private var importBanner: some View {
         if coordinator.isShowingProgress, let job = coordinator.activeJob {
             ZStack {
-                Color.black.opacity(0.45)
+                Color.black.opacity(0.55)
                     .ignoresSafeArea()
-                    .transition(.opacity)
 
                 ImportProgressCard(
                     job: job,
@@ -472,9 +485,12 @@ struct LibraryView: View {
                 ) {
                     coordinator.cancel(jobID: job.id)
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
             }
-            .animation(.easeOut(duration: 0.22))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .animation(.easeOut(duration: 0.22), value: coordinator.isShowingProgress)
+            .transition(.opacity)
+            .zIndex(60)
         }
     }
 

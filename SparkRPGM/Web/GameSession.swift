@@ -36,9 +36,21 @@ final class GameSession: NSObject, ObservableObject {
     private var didSetup = false
     private var lastReadyAt = Date.distantPast
     private var stallWorkItem: DispatchWorkItem?
+    private var loadingSafetyWorkItem: DispatchWorkItem?
+    /// `true` once the document finished, the injected `load` listener fired,
+    /// or the engine reported a running scene. Used by the stall watchdog so a
+    /// healthy game is never declared dead.
+    private var sawReadySignal = false
     /// 1x / 2x / 3x requested from the in-game top bar. Kept here so a reload
     /// or a web-process restart re-applies it to the fresh page.
     private var speedMultiplier = 1
+
+    /// Shown when the native spinner has to step aside before the engine says
+    /// it is alive. The banner stays dismissible, so the player is never stuck
+    /// on a grey screen.
+    static let slowBootNotice = "The game is still starting after 12 seconds. It may be waiting on a missing file or a slow WebAssembly compile."
+
+    static let missingEngineNotice = "The page loaded but no RPG Maker engine reported a running scene. A script may have failed to load."
 
     init(game: Game, entry: Entry = .gameIndex) {
         self.game = game
@@ -87,6 +99,7 @@ final class GameSession: NSObject, ObservableObject {
         let controller = configuration.userContentController
         controller.add(bridge, name: "sparkLog")
         controller.add(bridge, name: "sparkReady")
+        controller.add(bridge, name: "gameReady")
         controller.add(bridge, name: "sparkError")
         controller.add(bridge, name: "sparkContextLost")
         controller.add(bridge, name: "saveBridge")
@@ -162,7 +175,9 @@ final class GameSession: NSObject, ObservableObject {
         bootDiagnostic = nil
         missingResources = []
         didStall = false
+        sawReadySignal = false
         armStallWatchdog()
+        armLoadingSafetyGuard()
         var request = URLRequest(url: entryURL)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         webView.load(request)
@@ -175,18 +190,72 @@ final class GameSession: NSObject, ObservableObject {
         bootDiagnostic = nil
         missingResources = []
         didStall = false
+        sawReadySignal = false
         armStallWatchdog()
+        armLoadingSafetyGuard()
         webView?.reload()
     }
 
     private func armStallWatchdog() {
         stallWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
-            guard let self = self, self.isLoading else { return }
-            self.didStall = true
+            guard let self = self else { return }
+            guard !self.sawReadySignal, self.loadError == nil else { return }
+            // A concrete failure (missing script, data file, wasm module, or a
+            // JavaScript exception) deserves the actionable Retry / Close
+            // overlay. A slow but healthy boot stays a dismissible banner so
+            // the game canvas remains visible.
+            if let diagnostic = self.bootDiagnostic, diagnostic != Self.slowBootNotice {
+                self.didStall = true
+            } else if self.bootDiagnostic == nil {
+                self.bootDiagnostic = Self.slowBootNotice
+            }
         }
         stallWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: item)
+    }
+
+    /// The native spinner must never trap the player. If nothing has cleared it
+    /// after 12 seconds it steps aside and hands the screen to the diagnostics
+    /// banner, whatever the engine is doing.
+    private func armLoadingSafetyGuard() {
+        loadingSafetyWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isLoading, self.loadError == nil else { return }
+            self.markLoaded()
+            if self.bootDiagnostic == nil {
+                self.bootDiagnostic = Self.slowBootNotice
+            }
+        }
+        loadingSafetyWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: item)
+    }
+
+    private func markLoaded() {
+        loadingSafetyWorkItem?.cancel()
+        loadingSafetyWorkItem = nil
+        guard isLoading else { return }
+        isLoading = false
+        if speedMultiplier > 1 { applySpeed() }
+    }
+
+    /// Any readiness path (document finish, injected `load` event, running
+    /// `SceneManager`) lands here so the spinner, watchdog and error overlay
+    /// agree on one state.
+    private func markGameReady() {
+        sawReadySignal = true
+        didStall = false
+        if bootDiagnostic == Self.slowBootNotice || bootDiagnostic == Self.missingEngineNotice {
+            bootDiagnostic = nil
+        }
+        markLoaded()
+    }
+
+    /// Clears the on-screen diagnostic banner without touching the running game.
+    func dismissDiagnostic() {
+        bootDiagnostic = nil
+        missingResources = []
+        didStall = false
     }
 
     private func clearStallWatchdog() {
@@ -232,9 +301,11 @@ final class GameSession: NSObject, ObservableObject {
 
     func stop() {
         clearStallWatchdog()
+        loadingSafetyWorkItem?.cancel()
+        loadingSafetyWorkItem = nil
         webView?.stopLoading()
         let controller = webView?.configuration.userContentController
-        for name in ["sparkLog", "sparkReady", "sparkError", "sparkContextLost", "saveBridge", "fsBridge"] {
+        for name in ["sparkLog", "sparkReady", "gameReady", "sparkError", "sparkContextLost", "saveBridge", "fsBridge"] {
             controller?.removeScriptMessageHandler(forName: name)
         }
         webView?.navigationDelegate = nil
@@ -299,13 +370,16 @@ final class GameSession: NSObject, ObservableObject {
                 Log.web(String(describing: message.body))
             }
 
-        case "sparkReady":
-            if Date().timeIntervalSince(lastReadyAt) > 0.3 {
-                lastReadyAt = Date()
-                isLoading = false
-                didStall = false
-                clearStallWatchdog()
-                if speedMultiplier > 1 { applySpeed() }
+        case "sparkReady", "gameReady":
+            let payload = message.body as? [String: Any]
+            guard Date().timeIntervalSince(lastReadyAt) > 0.3 else { return }
+            lastReadyAt = Date()
+            markGameReady()
+            if let hasEngine = payload?["hasEngine"] as? Bool,
+               hasEngine == false,
+               bootDiagnostic == nil,
+               game.engine == .rpgMakerMZ || game.engine == .rpgMakerMV {
+                bootDiagnostic = Self.missingEngineNotice
             }
 
         case "sparkError":
@@ -574,13 +648,24 @@ extension GameSession: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if speedMultiplier > 1 { applySpeed() }
-        // MZ/MV only clear the overlay on `sparkReady`; a finished document with
-        // a failed script is exactly the case we want to keep visible.
-        if entry == .easyRPGHost || !game.engine.isWebBased {
-            isLoading = false
-            didStall = false
-            clearStallWatchdog()
+        // Dismiss the native spinner for every engine. MZ/MV continue painting
+        // their own boot screen after `load`, and any script failure is now
+        // surfaced by the dismissible diagnostic banner, not a grey overlay.
+        markLoaded()
+        scheduleMissingEngineCheck()
+    }
+
+    /// A finished document that never produced an engine object is the exact
+    /// shape of the "Starting RPG Maker MZ" hang. Say so instead of leaving a
+    /// black canvas with no explanation.
+    private func scheduleMissingEngineCheck() {
+        guard entry == .gameIndex, game.engine.isWebBased else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self, self.webView != nil else { return }
+            guard !self.sawReadySignal, self.loadError == nil, self.bootDiagnostic == nil else { return }
+            self.bootDiagnostic = Self.missingEngineNotice
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: item)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -588,6 +673,8 @@ extension GameSession: WKNavigationDelegate {
         loadError = error.localizedDescription
         isLoading = false
         clearStallWatchdog()
+        loadingSafetyWorkItem?.cancel()
+        loadingSafetyWorkItem = nil
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -595,6 +682,8 @@ extension GameSession: WKNavigationDelegate {
         loadError = error.localizedDescription
         isLoading = false
         clearStallWatchdog()
+        loadingSafetyWorkItem?.cancel()
+        loadingSafetyWorkItem = nil
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
@@ -605,7 +694,9 @@ extension GameSession: WKNavigationDelegate {
         bootDiagnostic = nil
         missingResources = []
         didStall = false
+        sawReadySignal = false
         armStallWatchdog()
+        armLoadingSafetyGuard()
         webView.reload()
     }
 

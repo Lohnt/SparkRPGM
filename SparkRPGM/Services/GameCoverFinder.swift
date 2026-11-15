@@ -1,36 +1,57 @@
 import Foundation
+import ImageIO
 
 /// Finds the best built-in artwork for a game and caches it so the Prism Icons
 /// grid can show a real image even when the user never picked a cover.
 ///
 /// Priority follows how explicit the asset is:
-/// `icon/icon.png` -> MZ/MV title art -> RPG Maker 2000/2003 `Title/` -> APK
-/// launcher icons. Everything is resolved case-insensitively because games are
-/// authored on Windows and macOS.
+/// exported title art (`titles1`, `titles2`, `Title/`) -> high-resolution APK
+/// launcher icons (>= 128px) -> the tiny `icon/icon.png` plugin icon.
+///
+/// Everything is resolved case-insensitively because games are authored on
+/// Windows and macOS. Small icons are still returned, but `CoverImageView`
+/// renders anything under 96px at a crisp 48pt instead of stretching it.
 enum GameCoverFinder {
 
-    private static let directCandidates = [
-        "icon/icon.png",
-        "icon/icon.jpg",
-        "icon.png",
-        "www/icon/icon.png",
-        "www/icon/icon.jpg",
-        "www/icon.png",
-        "res/mipmap-xxxhdpi/ic_launcher.png",
-        "res/mipmap-xxhdpi/ic_launcher.png",
-        "res/drawable-xxxhdpi/icon.png",
-        "assets/res/mipmap-xxxhdpi/ic_launcher.png",
-        "assets/res/drawable-xxxhdpi/icon.png",
-    ]
-
+    /// Exporters write the title screen here. `titles1` is the main artwork.
     private static let titleFolders = [
         "img/titles1",
         "www/img/titles1",
+        "img/titles2",
+        "www/img/titles2",
         "Title",
         "www/Title",
     ]
 
+    /// Android launcher icons, only when actually high resolution.
+    private static let launcherCandidates = [
+        "res/mipmap-xxxhdpi/ic_launcher.png",
+        "res/mipmap-xxhdpi/ic_launcher.png",
+        "assets/res/mipmap-xxxhdpi/ic_launcher.png",
+        "assets/res/mipmap-xxhdpi/ic_launcher.png",
+        "res/mipmap-xhdpi/ic_launcher.png",
+        "assets/res/mipmap-xhdpi/ic_launcher.png",
+        "res/drawable-xxxhdpi/icon.png",
+        "res/drawable-xxhdpi/icon.png",
+        "assets/res/drawable-xxxhdpi/icon.png",
+        "assets/res/drawable-xxhdpi/icon.png",
+    ]
+
+    /// Last resort: the plugin icon. Kept even when it is only 32×32 because a
+    /// recognisable mark beats a blank card.
+    private static let iconFallbacks = [
+        "icon/icon.png",
+        "icon/icon.jpg",
+        "www/icon/icon.png",
+        "www/icon/icon.jpg",
+        "icon.png",
+        "www/icon.png",
+    ]
+
     private static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "webp"]
+
+    static let minimumLauncherPixels = 128
+    static let minimumFullBleedPixels = 96
 
     /// Searches the game folder and the promoted engine root (they differ for
     /// manually copied `www/` wrappers) and returns the first usable image.
@@ -39,17 +60,30 @@ enum GameCoverFinder {
         let engineResolver = CaseInsensitiveFileResolver(root: engineRoot)
         let resolvers = [engineResolver, gameResolver]
 
+        // 1. Full-resolution title artwork.
         for resolver in resolvers {
-            for path in directCandidates {
-                if let url = resolver.resolve(path), isUsableImage(url) {
+            for folder in titleFolders {
+                if let url = firstImage(in: folder, resolver: resolver),
+                   isLargeEnough(url, minimum: minimumFullBleedPixels) {
                     return url
                 }
             }
         }
 
+        // 2. High-resolution Android launcher art.
         for resolver in resolvers {
-            for folder in titleFolders {
-                if let url = firstImage(in: folder, resolver: resolver) {
+            for path in launcherCandidates {
+                guard let url = resolver.resolve(path), isUsableImage(url) else { continue }
+                if isLargeEnough(url, minimum: minimumLauncherPixels) {
+                    return url
+                }
+            }
+        }
+
+        // 3. The plugin icon, whatever its size.
+        for resolver in resolvers {
+            for path in iconFallbacks {
+                if let url = resolver.resolve(path), isUsableImage(url) {
                     return url
                 }
             }
@@ -140,5 +174,23 @@ enum GameCoverFinder {
         guard imageExtensions.contains(url.pathExtension.lowercased()) else { return false }
         let values = try? url.resourceValues(forKeys: [.fileSizeKey])
         return (values?.fileSize ?? 0) > 0
+    }
+
+    /// Reads the real pixel dimensions without decoding the image into memory.
+    private static func pixelSize(of url: URL) -> (width: Int, height: Int)? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else {
+            return nil
+        }
+        return (width, height)
+    }
+
+    /// Unknown dimensions count as large enough: a readable file is better than
+    /// falling through to the plugin icon.
+    private static func isLargeEnough(_ url: URL, minimum: Int) -> Bool {
+        guard let size = pixelSize(of: url) else { return true }
+        return max(size.width, size.height) >= minimum
     }
 }

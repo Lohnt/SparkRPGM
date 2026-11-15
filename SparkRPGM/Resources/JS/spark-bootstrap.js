@@ -150,6 +150,47 @@
     }, 40);
   }
 
+  // MARK: - WebAssembly guard
+
+  // RPG Maker MZ links Effekseer through WebAssembly. On a 3 GB iPad a compile
+  // can take several seconds, and a module that 404s can leave `Scene_Boot`
+  // waiting forever. Report slow and failed compiles so the native banner can
+  // explain the delay, while letting the compile itself run to completion.
+  (function () {
+    var wasm = window.WebAssembly;
+    if (!wasm || typeof Promise === 'undefined') return;
+
+    function watch(promise, label) {
+      if (!promise || typeof promise.then !== 'function') return promise;
+      var timer = setTimeout(function () {
+        report('info', 'WebAssembly ' + label + ' is still compiling after 6s', '', 0);
+      }, 6000);
+      return promise.then(function (value) {
+        clearTimeout(timer);
+        return value;
+      }, function (error) {
+        clearTimeout(timer);
+        var message = error && error.message ? error.message : error;
+        report('wasm', 'WebAssembly ' + label + ' failed: ' + message, '', 0);
+        throw error;
+      });
+    }
+
+    ['instantiate', 'compile', 'instantiateStreaming', 'compileStreaming'].forEach(function (name) {
+      var original = wasm[name];
+      if (typeof original !== 'function') return;
+      wasm[name] = function () {
+        var result;
+        try {
+          result = original.apply(wasm, arguments);
+        } catch (error) {
+          return original.apply(wasm, arguments);
+        }
+        return watch(result, name);
+      };
+    });
+  })();
+
   // MARK: - Document-level failures
 
   window.addEventListener('DOMContentLoaded', function () {

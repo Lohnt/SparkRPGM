@@ -7,7 +7,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     case appearance = "Appearance"
     case wallpaper = "Wallpaper"
     case library = "Library"
-    case appIcon = "App Icon"
     case storage = "Storage"
 
     var id: String { rawValue }
@@ -17,7 +16,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .appearance: return "paintpalette"
         case .wallpaper: return "photo"
         case .library: return "square.grid.2x2"
-        case .appIcon: return "app.badge"
         case .storage: return "internaldrive"
         }
     }
@@ -32,8 +30,6 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         case .library:
             return ["library", "style", "lines", "prism", "grid", "card", "size", "sort",
                     "engine", "line", "colour", "color", "name", "title"]
-        case .appIcon:
-            return ["icon", "icons", "alternate", "home screen", "app"]
         case .storage:
             return ["storage", "space", "disk", "size", "reset", "appearance", "backups", "saves"]
         }
@@ -307,7 +303,7 @@ struct LauncherCustomizationView: View {
             Text("No settings match \"\(query)\"")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(SparkTheme.textPrimary)
-            Text("Try accent, wallpaper, icon or storage.")
+            Text("Try accent, wallpaper, library or storage.")
                 .font(.system(size: 12))
                 .foregroundColor(SparkTheme.textSecondary)
         }
@@ -322,7 +318,6 @@ struct LauncherCustomizationView: View {
         case .appearance: appearancePane
         case .wallpaper: wallpaperPane
         case .library: libraryPane
-        case .appIcon: appIconPane
         case .storage: storagePane
         }
     }
@@ -567,16 +562,6 @@ struct LauncherCustomizationView: View {
                     subtitle: "Uses one fixed color per engine instead of the launcher line color.",
                     isOn: binding(\.accentLineAutoByEngine)
                 )
-            }
-        }
-    }
-
-    private var appIconPane: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            paneTitle("App Icon")
-
-            group("ICON") {
-                AppIconPickerView()
             }
         }
     }

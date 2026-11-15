@@ -73,6 +73,10 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
 
         let request = urlSchemeTask.request
         let method = (request.httpMethod ?? "GET").uppercased()
+        if method == "OPTIONS" {
+            respondPreflight(urlSchemeTask, identifier: identifier, url: requestURL)
+            return
+        }
         if method != "GET" && method != "HEAD" {
             fail(urlSchemeTask, identifier: identifier, status: 405, message: "Method not allowed")
             return
@@ -142,6 +146,8 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
             "Accept-Ranges": "bytes",
             "Cache-Control": "no-cache",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
             "Cross-Origin-Resource-Policy": "cross-origin",
             "X-Spark-Served": "rpgm",
         ]
@@ -268,13 +274,43 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
         stateLock.unlock()
         guard isNew, let callback = onMissingResource else { return }
 
+        // The Xcode console mirrors the banner, which makes a CI build log or a
+        // TrollStore crash report enough to diagnose a missing file.
+        Log.web("Scheme 404: \(logical)")
+
         DispatchQueue.main.async {
             callback(logical)
         }
     }
 
-    // MARK: - Generated EasyRPG resources
+    /// CORS preflight. WebKit normally skips it for a custom scheme, but
+    /// engines that issue an explicit `OPTIONS` must get a clean answer.
+    private func respondPreflight(_ task: WKURLSchemeTask, identifier: ObjectIdentifier, url: URL) {
+        let headers: [String: String] = [
+            "Content-Length": "0",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Content-Type, Accept",
+            "Access-Control-Max-Age": "600",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+            "X-Spark-Served": "rpgm-preflight",
+        ]
 
+        guard let response = HTTPURLResponse(
+            url: url,
+            statusCode: 204,
+            httpVersion: "HTTP/1.1",
+            headerFields: headers
+        ) else {
+            fail(task, identifier: identifier, status: 500, message: "Response error")
+            return
+        }
+
+        guard send(response: response, to: task, identifier: identifier) else { return }
+        finish(task, identifier: identifier)
+    }
+
+    // MARK: - Generated EasyRPG resources
     private struct GeneratedResource {
         let data: Data
         let contentType: String
@@ -332,6 +368,7 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
             "Content-Length": String(data.count),
             "Cache-Control": "no-store",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
             "Cross-Origin-Resource-Policy": "cross-origin",
             "X-Spark-Served": "rpgm-generated",
         ]
@@ -458,6 +495,7 @@ final class RPGMSchemeHandler: NSObject, WKURLSchemeHandler {
             // this WebKit reports the 404 as a generic network error and hides
             // the real cause from the diagnostics overlay.
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
             "Cross-Origin-Resource-Policy": "cross-origin",
             "Cache-Control": "no-store",
             "X-Spark-Served": "rpgm-error",

@@ -119,9 +119,6 @@ struct LauncherSettings: Codable, Equatable {
     /// off keeps those buttons neutral so the accent stays decorative.
     var highlightPrimaryButtons: Bool = true
 
-    /// `nil` = the primary AppIcon.
-    var appIconName: String?
-
     enum CodingKeys: String, CodingKey {
         case headerTitle
         case accentHex
@@ -139,7 +136,6 @@ struct LauncherSettings: Codable, Equatable {
         case liquidGlassEnabled
         case liquidGlassIntensity
         case highlightPrimaryButtons
-        case appIconName
     }
 
     static let `default` = LauncherSettings()
@@ -206,7 +202,6 @@ extension LauncherSettings {
             ?? fallback.liquidGlassIntensity
         highlightPrimaryButtons = try container.decodeIfPresent(Bool.self, forKey: .highlightPrimaryButtons)
             ?? fallback.highlightPrimaryButtons
-        appIconName = try container.decodeIfPresent(String.self, forKey: .appIconName)
     }
 }
 

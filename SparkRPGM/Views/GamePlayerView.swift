@@ -15,8 +15,7 @@ struct GamePlayerView: View {
     @StateObject private var controls: ControlSettingsStore
     @StateObject private var playtime: PlaytimeTracker
 
-    @State private var showTopBar = true
-    @State private var showControls = true
+    @State private var isHUDHidden = false
     @State private var isEditing = false
     @State private var scope: ControlSettingsStore.Scope = .game
     @State private var didConfigure = false
@@ -40,21 +39,26 @@ struct GamePlayerView: View {
 
             gameContent
                 .ignoresSafeArea()
+                .zIndex(0)
 
             if session.isLoading, game.engine.isWebBased || game.engine.isEasyRPG {
                 loadingOverlay
+                    .zIndex(20)
             }
 
             if let error = session.loadError {
                 errorOverlay(message: error, detail: nil)
+                    .zIndex(22)
             } else if session.didStall {
                 errorOverlay(
                     message: session.bootDiagnostic ?? "The game did not finish starting.",
-                    detail: diagnosticDetail
+                    detail: diagnosticDetail,
+                    showsContinue: true
                 )
+                .zIndex(22)
             }
 
-            if showControls, !isEditing, !gameFailed {
+            if !isHUDHidden, !isEditing, !gameFailed {
                 TouchControlsView(
                     config: $controls.config,
                     isEditing: false,
@@ -62,6 +66,7 @@ struct GamePlayerView: View {
                     onRelease: { action in release(action) },
                     onEditCommitted: {}
                 )
+                .zIndex(5)
             }
 
             if isEditing, !gameFailed {
@@ -72,16 +77,26 @@ struct GamePlayerView: View {
                     onRelease: { _ in },
                     onEditCommitted: { controls.autosave(scope: scope) }
                 )
+                .zIndex(6)
 
                 customizerPanel
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .zIndex(8)
             }
 
-            if showTopBar, !gameFailed {
+            if let diagnostic = session.bootDiagnostic, !gameFailed, !session.isLoading {
+                errorBanner(diagnostic)
+                    .zIndex(15)
+            }
+
+            if !isHUDHidden, !gameFailed {
                 hudPill
                     .transition(.move(edge: .top).combined(with: .opacity))
-            } else if !isEditing, !gameFailed, !session.isLoading {
-                restoreHUDChip
+                    .zIndex(10)
+            } else if isHUDHidden, !isEditing, !gameFailed {
+                restoreHUDButton
+                    .transition(.opacity)
+                    .zIndex(10)
             }
         }
         .statusBar(hidden: true)
@@ -166,12 +181,33 @@ struct GamePlayerView: View {
                         }
                     }
                     .padding(.top, 4)
+                } else {
+                    Text("This can take a moment on first launch.")
+                        .font(.system(size: 10))
+                        .foregroundColor(SparkTheme.textTertiary)
+                        .padding(.top, 2)
+
+                    Button {
+                        close()
+                    } label: {
+                        Text("Close")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(SparkTheme.textSecondary)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 7)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .stroke(SparkTheme.hairline, lineWidth: SparkTheme.hairlineWidth)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
             }
         }
     }
 
-    private func errorOverlay(message: String, detail: String?) -> some View {
+    private func errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
         ZStack {
             SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
 
@@ -212,6 +248,13 @@ struct GamePlayerView: View {
                     overlayButton("Close", highlighted: true) {
                         close()
                     }
+                    if showsContinue {
+                        overlayButton("Continue", highlighted: false) {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                session.dismissDiagnostic()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -235,7 +278,9 @@ struct GamePlayerView: View {
                             lineWidth: SparkTheme.hairlineWidth
                         )
                 )
+                .contentShape(Rectangle())
         }
+        .buttonStyle(PlainButtonStyle())
     }
 
     // MARK: - HUD
@@ -264,8 +309,8 @@ struct GamePlayerView: View {
 
                 hudButton("eye.slash") {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        showTopBar = false
-                        showControls = false
+                        isEditing = false
+                        isHUDHidden = true
                     }
                 }
             }
@@ -280,6 +325,7 @@ struct GamePlayerView: View {
                 Capsule(style: .continuous)
                     .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
             )
+            .contentShape(Capsule(style: .continuous))
             .padding(.top, 8)
 
             Spacer()
@@ -296,7 +342,9 @@ struct GamePlayerView: View {
                         .fill(speedMultiplier > 1 ? accent.opacity(0.85) : Color.white.opacity(0.05))
                 )
                 .foregroundColor(SparkTheme.textPrimary)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(PlainButtonStyle())
         .accessibilityLabel("Game speed")
         .accessibilityValue("\(speedMultiplier) times")
     }
@@ -311,32 +359,113 @@ struct GamePlayerView: View {
                         .fill(active ? accent.opacity(0.85) : Color.white.opacity(0.05))
                 )
                 .foregroundColor(SparkTheme.textPrimary)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(PlainButtonStyle())
     }
 
-    private var restoreHUDChip: some View {
+    /// Top-right corner chip shown while the HUD is hidden. It stays small so
+    /// it never covers gameplay, and the whole 36×30 frame is tappable.
+    private var restoreHUDButton: some View {
         VStack {
-            Button {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    showTopBar = true
-                    showControls = true
+            HStack {
+                Spacer()
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        isHUDHidden = false
+                    }
+                } label: {
+                    Image(systemName: "eye")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(SparkTheme.textSecondary)
+                        .frame(width: 36, height: 30)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color(hex: "141418").opacity(0.72))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                        )
+                        .contentShape(Rectangle())
                 }
-            } label: {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(SparkTheme.textSecondary)
-                    .frame(width: 34, height: 22)
-                    .background(Capsule(style: .continuous).fill(Color(hex: "141418").opacity(0.72)))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-                    )
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel("Show controls")
+                .padding(.trailing, 10)
             }
-            .accessibilityLabel("Show controls")
-            .padding(.top, 8)
 
             Spacer()
         }
+        .padding(.top, 8)
+    }
+
+    // MARK: - Diagnostics banner
+
+    private func errorBanner(_ message: String) -> some View {
+        VStack {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(Color(red: 0.95, green: 0.62, blue: 0.36))
+                    .padding(.top, 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Game load issue")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(SparkTheme.textPrimary)
+
+                    Text(message)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundColor(SparkTheme.textSecondary)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if !session.missingResources.isEmpty {
+                        Text(missingSummary)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(SparkTheme.textTertiary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer(minLength: 4)
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        session.dismissDiagnostic()
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(SparkTheme.textSecondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel("Dismiss")
+            }
+            .padding(11)
+            .frame(maxWidth: 380, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color(hex: "141418").opacity(0.95))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 52)
+
+            Spacer()
+        }
+    }
+
+    private var missingSummary: String {
+        let count = session.missingResources.count
+        let names = session.missingResources.suffix(2).joined(separator: ", ")
+        return "\(count) missing file\(count == 1 ? "" : "s"): \(names)"
     }
 
     // MARK: - Control customizer

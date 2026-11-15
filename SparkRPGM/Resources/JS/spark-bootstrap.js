@@ -1101,6 +1101,7 @@
         var wrappedRun = function (sceneClass) {
           try {
             reapplyStorageAndDataManagerPatches();
+      syncLoadingSpinner();
           } catch (e) {}
           return origRun.apply(this, arguments);
         };
@@ -1274,6 +1275,8 @@
     }
     if (window.StorageManager || window.DataManager) {
       reapplyStorageAndDataManagerPatches();
+      syncLoadingSpinner();
+      syncLoadingSpinner();
     }
     if (window.Video) hookVideo(window.Video);
     if (window.FontManager) hookFontManager(window.FontManager);
@@ -1355,10 +1358,58 @@
     });
   }
 
+  // MARK: - iOS WebAudio Auto-Unlock & DOM Loading Spinner Sync
+
+  function unlockWebAudio() {
+    try {
+      var wa = window.WebAudio;
+      if (wa && wa._context && typeof wa._context.resume === 'function') {
+        if (wa._context.state === 'suspended' || wa._context.state === 'interrupted') {
+          wa._context.resume();
+        }
+      }
+    } catch (e) {}
+  }
+
+  ['touchstart', 'touchend', 'pointerdown', 'mousedown', 'keydown'].forEach(function (eventName) {
+    window.addEventListener(eventName, unlockWebAudio, { capture: true, passive: true });
+  });
+
+  function syncLoadingSpinner() {
+    try {
+      var gfx = window.Graphics;
+      var dm = window.DataManager;
+      var dbReady = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded();
+      var giReady = dm && typeof dm.isGlobalInfoLoaded === 'function' && dm.isGlobalInfoLoaded();
+
+      if (dbReady && giReady) {
+        if (gfx && typeof gfx._loadingCount === 'number' && gfx._loadingCount <= 0) {
+          gfx._loadingCount = 0;
+          if (typeof gfx.endLoading === 'function' && gfx._loadingSpinner) {
+            gfx.endLoading();
+          }
+          if (gfx._loadingSpinner && gfx._loadingSpinner.parentNode) {
+            gfx._loadingSpinner.parentNode.removeChild(gfx._loadingSpinner);
+            gfx._loadingSpinner = null;
+          }
+        }
+        var spinnerEl = document.getElementById('loadingSpinner');
+        if (spinnerEl && spinnerEl.parentNode) {
+          if (!gfx || typeof gfx._loadingCount !== 'number' || gfx._loadingCount <= 0) {
+            spinnerEl.style.display = 'none';
+            spinnerEl.parentNode.removeChild(spinnerEl);
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
   function checkReadinessWatchdog() {
     var sm = window.SceneManager;
     var gfx = window.Graphics;
     if (!sm && !gfx) return;
+
+    syncLoadingSpinner();
 
     var scene = (sm && (sm._scene || sm._nextScene)) || null;
     var sceneName = (scene && scene.constructor && scene.constructor.name) || 'Scene_Boot';
@@ -1393,6 +1444,53 @@
       giLoaded = 'true (recovered)';
     }
 
+    var fm = window.FontManager;
+    var fmReady = fm && typeof fm.isReady === 'function' ? fm.isReady() : true;
+    var im = window.ImageManager;
+    var imReady = im && typeof im.isReady === 'function' ? im.isReady() : true;
+
+    // Scene_Boot Force-Advance Guard:
+    // If Scene_Boot is active when DB and GlobalInfo are already loaded, along with fonts and images:
+    if (sceneName === 'Scene_Boot' && dbBool === true && giBool === true && fmReady && imReady) {
+      if (scene && !scene._databaseLoaded) {
+        scene._databaseLoaded = true;
+        if (typeof scene.onDatabaseLoaded === 'function') {
+          report('info', 'Watchdog: calling scene.onDatabaseLoaded() for Scene_Boot', '', 0);
+          try { scene.onDatabaseLoaded(); } catch (e) {}
+        }
+      }
+
+      if (!window.__sparkBootForceAdvanceTimer) {
+        window.__sparkBootForceAdvanceTimer = setTimeout(function () {
+          window.__sparkBootForceAdvanceTimer = null;
+          var currentSm = window.SceneManager;
+          var currentScene = currentSm && (currentSm._scene || currentSm._nextScene);
+          var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
+          if (curName === 'Scene_Boot') {
+            report('info', 'Watchdog force-advancing Scene_Boot -> Scene_Title', '', 0);
+            try {
+              if (typeof currentScene.start === 'function') {
+                currentScene.start();
+              }
+            } catch (e) {}
+
+            setTimeout(function () {
+              var smAfter = window.SceneManager;
+              var scAfter = smAfter && (smAfter._scene || smAfter._nextScene);
+              var nameAfter = (scAfter && scAfter.constructor && scAfter.constructor.name) || '';
+              if (nameAfter === 'Scene_Boot') {
+                var targetScene = window.Scene_Title || null;
+                if (targetScene && typeof smAfter.goto === 'function') {
+                  report('info', 'SceneManager.goto(Scene_Title) force-transition triggered', '', 0);
+                  try { smAfter.goto(targetScene); } catch (e) {}
+                }
+              }
+            }, 200);
+          }
+        }, 1000);
+      }
+    }
+
     var isSceneReady = true;
     if (scene && typeof scene.isReady === 'function') {
       try {
@@ -1419,6 +1517,8 @@
     }
 
     if (now - stallStartTime >= 2500) {
+      syncLoadingSpinner();
+
       if (sceneName === 'Scene_Boot' && dbBool === true && (!dm || !dm.isGlobalInfoLoaded || !dm.isGlobalInfoLoaded())) {
         if (dm) {
           dm._globalInfo = dm._globalInfo || [];
@@ -1455,24 +1555,24 @@
         } catch (e) {}
       }
 
-      var im = window.ImageManager;
-      if (im) {
-        inspectBitmaps(im._cache);
-        inspectBitmaps(im._system);
+      var imManager = window.ImageManager;
+      if (imManager) {
+        inspectBitmaps(imManager._cache);
+        inspectBitmaps(imManager._system);
       }
 
-      var fm = window.FontManager;
-      var fmReady = 'n/a';
+      var fmManager = window.FontManager;
+      var fmReadyStr = 'n/a';
       var unreadyFonts = [];
-      if (fm) {
+      if (fmManager) {
         try {
-          if (typeof fm.isReady === 'function') {
-            fmReady = String(fm.isReady());
+          if (typeof fmManager.isReady === 'function') {
+            fmReadyStr = String(fmManager.isReady());
           }
-          if (fm._states) {
-            for (var fontName in fm._states) {
-              if (fm._states[fontName] !== 'loaded') {
-                unreadyFonts.push(fontName + ' (' + fm._states[fontName] + ')');
+          if (fmManager._states) {
+            for (var fontName in fmManager._states) {
+              if (fmManager._states[fontName] !== 'loaded') {
+                unreadyFonts.push(fontName + ' (' + fmManager._states[fontName] + ')');
               }
             }
           }
@@ -1486,7 +1586,7 @@
       lines.push('LoadingCount: ' + loadingCount);
       lines.push('DB / GlobalInfo: DB=' + dbLoaded + ', GlobalInfo=' + giLoaded);
 
-      var fontVideo = 'FontManager.isReady()=' + fmReady;
+      var fontVideo = 'FontManager.isReady()=' + fmReadyStr;
       if (unreadyFonts.length > 0) {
         fontVideo += ' [' + unreadyFonts.join(', ') + ']';
       }
@@ -1503,6 +1603,14 @@
         lines.push('Pending XHRs (' + xhrKeys.length + '): ' + xhrKeys.slice(0, 3).join(', '));
       }
 
+      // Log Scene_Boot.prototype.isReady implementation if real stall occurs
+      if (sceneName === 'Scene_Boot' && scene && typeof scene.isReady === 'function') {
+        try {
+          var isReadySnippet = scene.isReady.toString().slice(0, 220).replace(/\s+/g, ' ');
+          lines.push('Scene_Boot.isReady: ' + isReadySnippet);
+        } catch (e) {}
+      }
+
       var diagnosticText = 'Stall detected (>2.5s):\n' + lines.join('\n');
       reportStall(diagnosticText);
     }
@@ -1516,6 +1624,7 @@
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       reapplyStorageAndDataManagerPatches();
+      syncLoadingSpinner();
       reportStage('DOM ready');
     }, false);
   } else {
@@ -1537,6 +1646,7 @@
         patchSceneManagerInstance(sm);
       }
       reapplyStorageAndDataManagerPatches();
+      syncLoadingSpinner();
       var currentScene = sm._scene || sm._nextScene;
       if (currentScene) {
         var name = (currentScene.constructor && currentScene.constructor.name) || '';

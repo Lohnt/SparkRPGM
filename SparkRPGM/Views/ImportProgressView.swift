@@ -101,7 +101,7 @@ struct ImportProgressCard: View {
             .padding(.top, 1)
         }
         .padding(18)
-        .frame(width: 320)
+        .frame(maxWidth: 420)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(hex: "#141418").opacity(0.97))

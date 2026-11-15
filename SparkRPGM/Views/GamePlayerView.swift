@@ -2,6 +2,88 @@ import SwiftUI
 import UIKit
 import WebKit
 
+// MARK: - Hidden On-Screen Keyboard Responder
+
+final class CustomTextField: UITextField {
+    var onBackspace: (() -> Void)?
+
+    override func deleteBackward() {
+        super.deleteBackward()
+        onBackspace?()
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        false
+    }
+}
+
+struct OnScreenKeyboardResponder: UIViewRepresentable {
+    @Binding var isFocused: Bool
+    let onCharacter: (String) -> Void
+    let onBackspace: () -> Void
+    let onReturn: () -> Void
+
+    func makeUIView(context: Context) -> CustomTextField {
+        let field = CustomTextField()
+        field.delegate = context.coordinator
+        field.autocorrectionType = .no
+        field.autocapitalizationType = .none
+        field.spellCheckingType = .no
+        field.smartQuotesType = .no
+        field.smartDashesType = .no
+        field.smartInsertDeleteType = .no
+        field.keyboardAppearance = .dark
+        field.alpha = 0.001
+        field.isUserInteractionEnabled = true
+        context.coordinator.onBackspace = onBackspace
+        return field
+    }
+
+    func updateUIView(_ uiView: CustomTextField, context: Context) {
+        context.coordinator.onBackspace = onBackspace
+        if isFocused {
+            if !uiView.isFirstResponder {
+                uiView.becomeFirstResponder()
+            }
+        } else {
+            if uiView.isFirstResponder {
+                uiView.resignFirstResponder()
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        let parent: OnScreenKeyboardResponder
+        var onBackspace: (() -> Void)?
+
+        init(parent: OnScreenKeyboardResponder) {
+            self.parent = parent
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            if string.isEmpty {
+                onBackspace?()
+            } else {
+                for char in string {
+                    parent.onCharacter(String(char))
+                }
+            }
+            return false
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onReturn()
+            return false
+        }
+    }
+}
+
+// MARK: - GamePlayerView
+
 struct GamePlayerView: View {
 
     let game: Game
@@ -15,7 +97,8 @@ struct GamePlayerView: View {
     @StateObject private var controls: ControlSettingsStore
     @StateObject private var playtime: PlaytimeTracker
 
-    @State private var isHUDHidden = false
+    @State private var isUtilityBarCollapsed = false
+    @State private var isKeyboardVisible = false
     @State private var isEditing = false
     @State private var scope: ControlSettingsStore.Scope = .game
     @State private var didConfigure = false
@@ -59,27 +142,18 @@ struct GamePlayerView: View {
                 .zIndex(22)
             }
 
-            if !isHUDHidden, !isEditing, !gameFailed {
+            if !gameFailed {
                 TouchControlsView(
                     config: $controls.config,
-                    isEditing: false,
+                    isEditing: isEditing,
                     onPress: { action in press(action) },
                     onRelease: { action in release(action) },
-                    onEditCommitted: {}
+                    onEditCommitted: { controls.autosave(scope: scope) }
                 )
                 .zIndex(5)
             }
 
             if isEditing, !gameFailed {
-                TouchControlsView(
-                    config: $controls.config,
-                    isEditing: true,
-                    onPress: { _ in },
-                    onRelease: { _ in },
-                    onEditCommitted: { controls.autosave(scope: scope) }
-                )
-                .zIndex(6)
-
                 customizerPanel
                     .transition(.move(edge: .trailing).combined(with: .opacity))
                     .zIndex(8)
@@ -90,15 +164,22 @@ struct GamePlayerView: View {
                     .zIndex(15)
             }
 
-            if !isHUDHidden, !gameFailed {
-                hudPill
+            if !gameFailed {
+                collapsibleUtilityBar
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .zIndex(10)
-            } else if isHUDHidden, !isEditing, !gameFailed {
-                restoreHUDButton
-                    .transition(.opacity)
-                    .zIndex(10)
             }
+
+            // Hidden on-screen keyboard responder
+            OnScreenKeyboardResponder(
+                isFocused: $isKeyboardVisible,
+                onCharacter: handleKeyboardCharacter,
+                onBackspace: handleKeyboardBackspace,
+                onReturn: handleKeyboardReturn
+            )
+            .frame(width: 1, height: 1)
+            .opacity(0.001)
+            .allowsHitTesting(false)
         }
         .statusBar(hidden: true)
         .preferredColorScheme(.dark)
@@ -208,7 +289,7 @@ struct GamePlayerView: View {
         }
     }
 
-    private func errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
+    private var errorOverlay(message: String, detail: String?, showsContinue: Bool = false) -> some View {
         ZStack {
             SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
 
@@ -284,50 +365,92 @@ struct GamePlayerView: View {
         .buttonStyle(PlainButtonStyle())
     }
 
-    // MARK: - HUD
+    // MARK: - Collapsible Top-Center Utility Bar
 
-    /// Compact floating capsule: Back, Speed, Controls, Hide. Sits centred at
-    /// the top instead of spanning the screen.
-    private var hudPill: some View {
+    private var collapsibleUtilityBar: some View {
         VStack {
-            HStack(spacing: 2) {
-                hudButton("chevron.left", action: close)
-
-                Rectangle()
-                    .fill(Color.white.opacity(0.10))
-                    .frame(width: 0.5, height: 15)
-                    .padding(.horizontal, 2)
-
-                if !game.engine.isMKXP {
-                    speedButton
-                }
-
-                hudButton("slider.horizontal.3", active: isEditing) {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        isEditing.toggle()
+            if isUtilityBarCollapsed {
+                Button {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        isUtilityBarCollapsed = false
                     }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color.white.opacity(0.85))
+                        .frame(width: 44, height: 22)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.black.opacity(0.65))
+                        )
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .stroke(Color.white.opacity(0.18), lineWidth: 0.75)
+                        )
                 }
+                .buttonStyle(PlainButtonStyle())
+                .accessibilityLabel("Expand utility bar")
+                .padding(.top, 4)
+            } else {
+                HStack(spacing: 3) {
+                    hudButton("chevron.left", action: close)
+                        .accessibilityLabel("Back to Library")
 
-                hudButton("eye.slash") {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        isEditing = false
-                        isHUDHidden = true
+                    Rectangle()
+                        .fill(Color.white.opacity(0.12))
+                        .frame(width: 0.5, height: 16)
+                        .padding(.horizontal, 2)
+
+                    if !game.engine.isMKXP {
+                        speedButton
                     }
+
+                    hudButton("keyboard", active: isKeyboardVisible) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            isKeyboardVisible.toggle()
+                        }
+                    }
+                    .accessibilityLabel("On-screen Keyboard")
+
+                    hudButton(controls.config.hideAllControls ? "eye.slash" : "gamecontroller", active: controls.config.hideAllControls) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            controls.config.hideAllControls.toggle()
+                            controls.autosave(scope: scope)
+                        }
+                    }
+                    .accessibilityLabel("Toggle Controls")
+
+                    hudButton("slider.horizontal.3", active: isEditing) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            isEditing.toggle()
+                        }
+                    }
+                    .accessibilityLabel("Customize Controls")
+
+                    Rectangle()
+                        .fill(Color.white.opacity(0.12))
+                        .frame(width: 0.5, height: 16)
+                        .padding(.horizontal, 2)
+
+                    hudButton("chevron.up") {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            isUtilityBarCollapsed = true
+                        }
+                    }
+                    .accessibilityLabel("Collapse Utility Bar")
                 }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.black.opacity(0.65))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(0.16), lineWidth: 0.75)
+                )
+                .padding(.top, 8)
             }
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .frame(width: 180)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color(hex: "141418").opacity(0.75))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-            )
-            .contentShape(Capsule(style: .continuous))
-            .padding(.top, 8)
 
             Spacer()
         }
@@ -363,42 +486,6 @@ struct GamePlayerView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-    }
-
-    /// Top-right corner chip shown while the HUD is hidden. It stays small so
-    /// it never covers gameplay, and the whole 36×30 frame is tappable.
-    private var restoreHUDButton: some View {
-        VStack {
-            HStack {
-                Spacer()
-
-                Button {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        isHUDHidden = false
-                    }
-                } label: {
-                    Image(systemName: "eye")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(SparkTheme.textSecondary)
-                        .frame(width: 36, height: 30)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color(hex: "141418").opacity(0.72))
-                        )
-                        .overlay(
-                            Capsule(style: .continuous)
-                                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PlainButtonStyle())
-                .accessibilityLabel("Show controls")
-                .padding(.trailing, 10)
-            }
-
-            Spacer()
-        }
-        .padding(.top, 8)
     }
 
     // MARK: - Diagnostics banner
@@ -469,16 +556,16 @@ struct GamePlayerView: View {
         return "\(count) missing file\(count == 1 ? "" : "s"): \(names)"
     }
 
-    // MARK: - Control customizer
+    // MARK: - Control Customizer Panel
 
     private var customizerPanel: some View {
         VStack {
             HStack {
                 Spacer()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 14) {
                         HStack {
-                            Text("Controls")
+                            Text("Customize Controls")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(SparkTheme.textPrimary)
                             Spacer()
@@ -491,19 +578,31 @@ struct GamePlayerView: View {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 11, weight: .semibold))
                                     .foregroundColor(SparkTheme.textSecondary)
+                                    .frame(width: 24, height: 24)
                             }
                         }
 
-                        Text("Drag the D-Pad or the buttons to reposition them.")
+                        Text("Tap buttons to enable or disable them. Drag any button or the D-Pad directly on screen to reposition.")
                             .font(.system(size: 10))
                             .foregroundColor(SparkTheme.textTertiary)
                             .fixedSize(horizontal: false, vertical: true)
+
+                        Text("BUTTON LIBRARY")
+                            .sparkSectionLabel()
+
+                        buttonLibraryGrid
+
+                        Text("SAVE CONFIGURATION")
+                            .sparkSectionLabel()
 
                         Picker("Save to", selection: $scope) {
                             Text("This Game").tag(ControlSettingsStore.Scope.game)
                             Text("Global").tag(ControlSettingsStore.Scope.global)
                         }
                         .pickerStyle(SegmentedPickerStyle())
+
+                        Text("SIZES & OPACITY")
+                            .sparkSectionLabel()
 
                         labeledSlider(
                             "D-Pad size",
@@ -513,25 +612,27 @@ struct GamePlayerView: View {
                         )
 
                         labeledSlider(
-                            "Action size",
-                            value: $controls.config.actionScale,
+                            "Button size",
+                            value: $controls.config.buttonScale,
                             range: 0.6...1.8,
-                            display: String(format: "%.1fx", controls.config.actionScale)
+                            display: String(format: "%.1fx", controls.config.buttonScale)
                         )
 
                         labeledSlider(
                             "Button opacity",
                             value: $controls.config.opacity,
-                            range: 0.1...1.0,
+                            range: 0.15...1.0,
                             display: "\(Int(controls.config.opacity * 100))%"
                         )
+
+                        Text("BEHAVIOR")
+                            .sparkSectionLabel()
 
                         toggleRow("Auto-fade when idle", isOn: $controls.config.autoFade)
                         toggleRow("8-way D-Pad", isOn: $controls.config.eightWay)
                         toggleRow("Haptic feedback", isOn: $controls.config.haptics)
                         toggleRow("Mirror left / right", isOn: $controls.config.mirrored)
-                        toggleRow("Show Shift button", isOn: $controls.config.showShift)
-                        toggleRow("Show Ctrl / Skip button", isOn: $controls.config.showCtrl)
+                        toggleRow("Hide All Controls", isOn: $controls.config.hideAllControls)
 
                         Text("ORIENTATION")
                             .sparkSectionLabel()
@@ -544,10 +645,9 @@ struct GamePlayerView: View {
                         .pickerStyle(SegmentedPickerStyle())
 
                         HStack(spacing: 8) {
-                            Button("Reload") {
-                                session.reload()
+                            Button("Reset Default") {
                                 withAnimation(.easeOut(duration: 0.2)) {
-                                    isEditing = false
+                                    controls.reset()
                                 }
                             }
                             .font(.system(size: 12, weight: .medium))
@@ -557,17 +657,7 @@ struct GamePlayerView: View {
                             .foregroundColor(SparkTheme.textSecondary)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-                            Button("Reset") {
-                                controls.reset()
-                            }
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
-                            .background(Color.white.opacity(0.06))
-                            .foregroundColor(SparkTheme.textSecondary)
-                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-
-                            Button("Save") {
+                            Button("Done") {
                                 controls.save(scope: scope)
                                 withAnimation(.easeOut(duration: 0.2)) {
                                     isEditing = false
@@ -581,17 +671,51 @@ struct GamePlayerView: View {
                             .foregroundColor(.white)
                             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
-                        .padding(.top, 2)
+                        .padding(.top, 4)
                     }
                     .padding(15)
                 }
-                .frame(maxHeight: 520)
-                .frame(width: 300)
+                .frame(maxHeight: 560)
+                .frame(width: 310)
                 .sparkPanel(cornerRadius: 14, fill: SparkTheme.panel, borderOpacity: 0.12)
                 .padding(.trailing, 16)
-                .padding(.top, 66)
+                .padding(.top, 56)
             }
             Spacer()
+        }
+    }
+
+    private var buttonLibraryGrid: some View {
+        let columns = [
+            GridItem(.adaptive(minimum: 52), spacing: 6)
+        ]
+        return LazyVGrid(columns: columns, spacing: 6) {
+            ForEach(VirtualButtonID.allCases) { btn in
+                let enabled = controls.config.isEnabled(btn)
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        controls.config.setEnabled(btn, !enabled)
+                    }
+                } label: {
+                    Text(btn.label)
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .foregroundColor(enabled ? .white : SparkTheme.textTertiary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 30)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(enabled ? accent.opacity(0.85) : Color.white.opacity(0.05))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .stroke(
+                                    enabled ? Color.white.opacity(0.35) : SparkTheme.hairline,
+                                    lineWidth: SparkTheme.hairlineWidth
+                                )
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
     }
 
@@ -601,14 +725,14 @@ struct GamePlayerView: View {
         range: ClosedRange<Double>,
         display: String
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                     .font(.system(size: 11))
                     .foregroundColor(SparkTheme.textSecondary)
                 Spacer()
                 Text(display)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(SparkTheme.textTertiary)
             }
             Slider(value: value, in: range)
@@ -625,7 +749,7 @@ struct GamePlayerView: View {
         .toggleStyle(SwitchToggleStyle(tint: accent))
     }
 
-    // MARK: - Lifecycle and input
+    // MARK: - Lifecycle
 
     private func configureOnce() {
         guard !didConfigure else { return }
@@ -669,6 +793,35 @@ struct GamePlayerView: View {
 
         if let secondary = action.secondaryKeyCode {
             session.sendKey(type: type, key: action.key, keyCode: secondary, button: action.rpgmButton)
+        }
+    }
+
+    // MARK: - Software Keyboard Keystroke Routing
+
+    private func handleKeyboardCharacter(_ char: String) {
+        let keyCode: Int
+        if let ascii = char.uppercased().utf8.first {
+            keyCode = Int(ascii)
+        } else {
+            keyCode = Int(char.unicodeScalars.first?.value ?? 0)
+        }
+        session.sendKey(type: "keydown", key: char, keyCode: keyCode, button: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+            self.session.sendKey(type: "keyup", key: char, keyCode: keyCode, button: nil)
+        }
+    }
+
+    private func handleKeyboardBackspace() {
+        session.sendKey(type: "keydown", key: "Backspace", keyCode: 8, button: "cancel")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+            self.session.sendKey(type: "keyup", key: "Backspace", keyCode: 8, button: "cancel")
+        }
+    }
+
+    private func handleKeyboardReturn() {
+        session.sendKey(type: "keydown", key: "Enter", keyCode: 13, button: "ok")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+            self.session.sendKey(type: "keyup", key: "Enter", keyCode: 13, button: "ok")
         }
     }
 

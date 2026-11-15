@@ -474,20 +474,24 @@ struct LibraryView: View {
     @ViewBuilder
     private var importBanner: some View {
         if coordinator.isShowingProgress, let job = coordinator.activeJob {
-            ZStack {
-                Color.black.opacity(0.55)
-                    .ignoresSafeArea()
+            GeometryReader { geo in
+                ZStack(alignment: .center) {
+                    Color.black.opacity(0.55)
+                        .ignoresSafeArea()
 
-                ImportProgressCard(
-                    job: job,
-                    activeCount: coordinator.activeCount,
-                    accent: accent
-                ) {
-                    coordinator.cancel(jobID: job.id)
+                    ImportProgressCard(
+                        job: job,
+                        activeCount: coordinator.activeCount,
+                        accent: accent
+                    ) {
+                        coordinator.cancel(jobID: job.id)
+                    }
+                    .frame(maxWidth: min(geo.size.width - 32, 480))
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
-                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .ignoresSafeArea()
             .animation(.easeOut(duration: 0.22), value: coordinator.isShowingProgress)
             .transition(.opacity)
             .zIndex(60)

@@ -104,6 +104,12 @@ final class DocumentPickerPresenter: NSObject, UIDocumentPickerDelegate {
         picker.allowsMultipleSelection = allowsMultipleSelection
         picker.shouldShowFileExtensions = true
         picker.modalPresentationStyle = .formSheet
+        picker.preferredContentSize = CGSize(width: 580, height: 600)
+        if let popover = picker.popoverPresentationController {
+            popover.sourceView = presenter.view
+            popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
         picker.modalTransitionStyle = .coverVertical
 
         activePicker = picker

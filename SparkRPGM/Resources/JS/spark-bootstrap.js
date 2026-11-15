@@ -16,6 +16,38 @@
   var reported = Object.create(null);
   var reportCount = 0;
   var MAX_REPORTS = 30;
+  var pendingXHRs = Object.create(null);
+  var pendingImages = Object.create(null);
+
+  try {
+    var origImageSrcDesc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
+    if (origImageSrcDesc && origImageSrcDesc.set) {
+      Object.defineProperty(HTMLImageElement.prototype, 'src', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          return origImageSrcDesc.get.call(this);
+        },
+        set: function (url) {
+          var self = this;
+          var imgUrl = String(url || '');
+          if (imgUrl && imgUrl.indexOf('data:') !== 0) {
+            pendingImages[imgUrl] = Date.now();
+            var onDone = function () {
+              delete pendingImages[imgUrl];
+              self.removeEventListener('load', onDone);
+              self.removeEventListener('error', onDone);
+              self.removeEventListener('abort', onDone);
+            };
+            self.addEventListener('load', onDone, false);
+            self.addEventListener('error', onDone, false);
+            self.addEventListener('abort', onDone, false);
+          }
+          return origImageSrcDesc.set.call(this, url);
+        }
+      });
+    }
+  } catch (e) {}
 
   function handlers() {
     return (window.webkit && window.webkit.messageHandlers) || null;
@@ -227,6 +259,21 @@
       var self = this;
       var targetUrl = self._sparkResolvedUrl || self._sparkRawUrl || '';
 
+      if (targetUrl) {
+        pendingXHRs[targetUrl] = Date.now();
+        var onComplete = function () {
+          delete pendingXHRs[targetUrl];
+          self.removeEventListener('load', onComplete);
+          self.removeEventListener('error', onComplete);
+          self.removeEventListener('abort', onComplete);
+          self.removeEventListener('timeout', onComplete);
+        };
+        self.addEventListener('load', onComplete, false);
+        self.addEventListener('error', onComplete, false);
+        self.addEventListener('abort', onComplete, false);
+        self.addEventListener('timeout', onComplete, false);
+      }
+
       self.addEventListener('error', function () {
         self._sparkFailed = true;
         report('resource', 'Failed to load: ' + targetUrl, targetUrl, 0, {
@@ -238,6 +285,7 @@
       try {
         return originalSend.apply(this, arguments);
       } catch (err) {
+        if (targetUrl) delete pendingXHRs[targetUrl];
         self._sparkFailed = true;
         report('resource', 'Failed to load: ' + targetUrl + ' (' + (err.message || err) + ')', targetUrl, 0);
         throw err;
@@ -750,18 +798,42 @@
         };
         sm.saveToForage = function (saveName, zip) {
           var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
-          return sparkLocalForage.setItem(key, zip);
+          var zipString = typeof zip === 'string' ? zip : (zip !== null && zip !== undefined ? JSON.stringify(zip) : '');
+          return sparkLocalForage.setItem(key, zipString);
+        };
+        sm.saveZip = function (saveName, zip) {
+          return this.saveToForage(saveName, zip);
         };
         sm.loadFromForage = function (saveName) {
           var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
-          return sparkLocalForage.getItem(key);
+          return sparkLocalForage.getItem(key).then(function (data) {
+            if (data !== null && data !== undefined && data !== '') {
+              return data;
+            } else {
+              return Promise.reject(new Error("Save not found: " + saveName));
+            }
+          });
         };
-        if (!sm.saveZip) {
-          sm.saveZip = function (saveName, zip) { return this.saveToForage(saveName, zip); };
-        }
-        if (!sm.loadZip) {
-          sm.loadZip = function (saveName) { return this.loadFromForage(saveName); };
-        }
+        sm.loadZip = function (saveName) {
+          return this.loadFromForage(saveName);
+        };
+        var origZipToJson = sm.zipToJson;
+        sm.zipToJson = function (zip) {
+          if (typeof zip === 'string') {
+            var trimmed = zip.trim();
+            if (trimmed.charAt(0) === '{' || trimmed.charAt(0) === '[') {
+              return zip;
+            }
+          }
+          if (origZipToJson) {
+            try {
+              return origZipToJson.apply(this, arguments);
+            } catch (e) {
+              return zip;
+            }
+          }
+          return zip;
+        };
         if (!sm.exists) {
           sm.exists = function (saveName) { return this.forageExists(saveName); };
         }
@@ -1008,6 +1080,102 @@
     });
   })();
 
+  // MARK: - 3-Second Readiness Blockers Watchdog
+
+  var readinessWatchdogStarted = false;
+  function startReadinessWatchdog() {
+    if (readinessWatchdogStarted) return;
+    readinessWatchdogStarted = true;
+
+    setTimeout(function checkReadiness() {
+      if (window.Spark && window.Spark.readySent) return;
+
+      var sm = window.SceneManager;
+      if (!sm) return;
+
+      var scene = sm._scene || sm._nextScene;
+      var sceneName = (scene && scene.constructor && scene.constructor.name) || 'Scene_Boot';
+      var isSceneReady = false;
+      try {
+        isSceneReady = scene && typeof scene.isReady === 'function' ? scene.isReady() : false;
+      } catch (e) {
+        isSceneReady = false;
+      }
+
+      var loadingCount = 0;
+      try {
+        loadingCount = (window.Graphics && typeof window.Graphics._loadingCount === 'number') ? window.Graphics._loadingCount : 0;
+      } catch (e) {}
+
+      if (loadingCount > 0 || !isSceneReady) {
+        var blockers = [];
+
+        var dm = window.DataManager;
+        if (dm) {
+          try {
+            if (typeof dm.isDatabaseLoaded === 'function' && !dm.isDatabaseLoaded()) {
+              blockers.push('DataManager.isDatabaseLoaded() is false');
+            }
+          } catch (e) {}
+          try {
+            if (typeof dm.isGlobalInfoLoaded === 'function' && !dm.isGlobalInfoLoaded()) {
+              blockers.push('DataManager.isGlobalInfoLoaded() is false');
+            }
+          } catch (e) {}
+        }
+
+        var im = window.ImageManager;
+        if (im) {
+          try {
+            if (typeof im.isReady === 'function' && !im.isReady()) {
+              blockers.push('ImageManager.isReady() is false');
+              if (im._cache) {
+                for (var key in im._cache) {
+                  var bmp = im._cache[key];
+                  if (bmp && typeof bmp.isReady === 'function' && !bmp.isReady()) {
+                    blockers.push('Image pending: ' + (bmp._url || key));
+                  }
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        var fm = window.FontManager;
+        if (fm) {
+          try {
+            if (typeof fm.isReady === 'function' && !fm.isReady()) {
+              blockers.push('FontManager.isReady() is false');
+            }
+          } catch (e) {}
+        }
+
+        var xhrKeys = Object.keys(pendingXHRs);
+        if (xhrKeys.length > 0) {
+          xhrKeys.forEach(function (url) {
+            blockers.push('XHR pending: ' + url);
+          });
+        }
+
+        var imgKeys = Object.keys(pendingImages);
+        if (imgKeys.length > 0) {
+          imgKeys.forEach(function (url) {
+            blockers.push('Image pending: ' + url);
+          });
+        }
+
+        if (blockers.length === 0) {
+          blockers.push(sceneName + '.isReady() is false');
+        }
+
+        var msg = 'Readiness blocker in ' + sceneName + (loadingCount > 0 ? ' (loadingCount=' + loadingCount + ')' : '') + ':\n' + blockers.join('\n');
+        report('stall', msg, '', 0);
+
+        setTimeout(checkReadiness, 3000);
+      }
+    }, 3000);
+  }
+
   // MARK: - Milestone Listeners (DOM, main.js, Scenes)
 
   if (document.readyState === 'loading') {
@@ -1030,6 +1198,7 @@
       if (typeof patchSceneManagerInstance === 'function') {
         patchSceneManagerInstance(sm);
       }
+      startReadinessWatchdog();
       var currentScene = sm._scene || sm._nextScene;
       if (currentScene) {
         var name = (currentScene.constructor && currentScene.constructor.name) || '';
@@ -1037,10 +1206,14 @@
           reportStage('Scene_Boot started');
         } else if (name === 'Scene_Title') {
           clearInterval(sceneTimer);
+          window.Spark = window.Spark || {};
+          window.Spark.readySent = true;
           reportStage('Title screen active', true);
           post('gameReady', { reason: 'title-active', hasEngine: true });
         } else if (name) {
           clearInterval(sceneTimer);
+          window.Spark = window.Spark || {};
+          window.Spark.readySent = true;
           reportStage(name + ' active', true);
           post('gameReady', { reason: 'scene-active', hasEngine: true });
         }

@@ -323,7 +323,15 @@
         var origSetup = pm.setup;
         var wrappedSetup = function (plugins) {
           sanitizePluginsList(plugins);
-          return origSetup.apply(this, arguments);
+          var res = origSetup.apply(this, arguments);
+          try {
+            ensureHUDDefaults();
+            if (window.Scene_Boot) {
+              if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
+              if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+            }
+          } catch (e) {}
+          return res;
         };
         wrappedSetup.__sparkWrapped = true;
         pm.setup = wrappedSetup;
@@ -347,6 +355,44 @@
     });
   } catch (e) {}
 
+  function ensureSafeHUDData(target, prop) {
+    if (!target) return;
+    try {
+      var val = target[prop] || { data: [] };
+      if (val && typeof val === 'object' && !val.data) {
+        val.data = [];
+      }
+      Object.defineProperty(target, prop, {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          if (!val || typeof val !== 'object') val = { data: [] };
+          if (!val.data) val.data = [];
+          return val;
+        },
+        set: function (newVal) {
+          if (newVal && typeof newVal === 'object') {
+            if (!newVal.data) newVal.data = [];
+            val = newVal;
+          } else if (!newVal) {
+            val = { data: [] };
+          } else {
+            val = newVal;
+          }
+        }
+      });
+    } catch (e) {}
+  }
+
+  function ensureHUDDefaults() {
+    ensureSafeHUDData(window, '$dataUltraHUD');
+    ensureSafeHUDData(window, '$dataHUD');
+    ensureSafeHUDData(window, '$dataHUDMakerUltra');
+    ensureSafeHUDData(window, 'UltraHUD');
+  }
+
+  ensureHUDDefaults();
+
   function ensureButtonCommonEventsDefaults() {
     try {
       if (!window.VisuMZ) return;
@@ -369,6 +415,7 @@
     var origInit = gs.prototype.initialize;
     var wrappedInit = function () {
       ensureButtonCommonEventsDefaults();
+    ensureHUDDefaults();
       try {
         return origInit.apply(this, arguments);
       } catch (e) {
@@ -424,6 +471,7 @@
   function patchSpriteButtonCommonEventsContainer(cls) {
     if (!cls || !cls.prototype) return;
     ensureButtonCommonEventsDefaults();
+    ensureHUDDefaults();
 
     var methods = ['initialize', 'createButtons', 'refresh', 'setupButtons', 'update'];
     for (var i = 0; i < methods.length; i++) {
@@ -433,6 +481,7 @@
           (function (mName, origMethod) {
             var wrappedMethod = function () {
               ensureButtonCommonEventsDefaults();
+    ensureHUDDefaults();
               try {
                 return origMethod.apply(this, arguments);
               } catch (e) {
@@ -471,6 +520,7 @@
         var origCreate = sm.prototype.createButtonCommonEvents;
         var wrappedCreate = function () {
           ensureButtonCommonEventsDefaults();
+    ensureHUDDefaults();
           try {
             return origCreate.apply(this, arguments);
           } catch (e) {
@@ -764,6 +814,113 @@
     } catch (e) {}
 
     try {
+      var currentOnDbLoaded = sb.prototype.onDatabaseLoaded;
+      function wrapOnDatabaseLoaded(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          this._sparkOnDatabaseLoadedDone = true;
+          this._databaseLoaded = true;
+          try {
+            if (window.$dataSystem && window.$dataSystem.advanced && typeof this.loadGameFonts === 'function') {
+              try { this.loadGameFonts(); } catch (e) {}
+            }
+          } catch (e) {}
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.onDatabaseLoaded recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentOnDbLoaded === 'function' && !currentOnDbLoaded.__sparkWrapped) {
+        currentOnDbLoaded = wrapOnDatabaseLoaded(currentOnDbLoaded);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'onDatabaseLoaded', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentOnDbLoaded;
+          },
+          set: function (newFn) {
+            currentOnDbLoaded = wrapOnDatabaseLoaded(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentOnDbLoaded) sb.prototype.onDatabaseLoaded = currentOnDbLoaded;
+      }
+    } catch (e) {}
+
+    try {
+      var currentStart = sb.prototype.start;
+      function wrapStart(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentStart === 'function' && !currentStart.__sparkWrapped) {
+        currentStart = wrapStart(currentStart);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'start', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentStart;
+          },
+          set: function (newFn) {
+            currentStart = wrapStart(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentStart) sb.prototype.start = currentStart;
+      }
+    } catch (e) {}
+
+    try {
+      var currentIsReady = sb.prototype.isReady;
+      function wrapIsReady(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
+            return true;
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentIsReady === 'function' && !currentIsReady.__sparkWrapped) {
+        currentIsReady = wrapIsReady(currentIsReady);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'isReady', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentIsReady;
+          },
+          set: function (newFn) {
+            currentIsReady = wrapIsReady(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentIsReady) sb.prototype.isReady = currentIsReady;
+      }
+    } catch (e) {}
+
+    try {
       var currentPreloadHUD = sb.prototype.preloadHUDMakerUltraFonts;
       function wrapPreloadHUD(fn) {
         if (!fn || fn.__sparkWrapped) return fn;
@@ -891,13 +1048,44 @@
           this._databaseLoaded = true;
           try {
             if (window.$dataSystem && window.$dataSystem.advanced && typeof this.loadGameFonts === 'function') {
-              this.loadGameFonts();
+              try { this.loadGameFonts(); } catch (e) {}
             }
           } catch (e) {}
-          return origOnDbLoaded.apply(this, arguments);
+          try {
+            return origOnDbLoaded.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.onDatabaseLoaded recovered: ' + formatError(e), '', 0);
+          }
         };
         wrappedOnDbLoaded.__sparkWrapped = true;
         sb.prototype.onDatabaseLoaded = wrappedOnDbLoaded;
+      }
+
+      if (typeof sb.prototype.start === 'function' && !sb.prototype.start.__sparkWrapped) {
+        var origStart = sb.prototype.start;
+        var wrappedStart = function () {
+          try {
+            return origStart.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedStart.__sparkWrapped = true;
+        sb.prototype.start = wrappedStart;
+      }
+
+      if (typeof sb.prototype.isReady === 'function' && !sb.prototype.isReady.__sparkWrapped) {
+        var origIsReady = sb.prototype.isReady;
+        var wrappedIsReady = function () {
+          try {
+            return origIsReady.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
+            return true;
+          }
+        };
+        wrappedIsReady.__sparkWrapped = true;
+        sb.prototype.isReady = wrappedIsReady;
       }
 
       if (typeof sb.prototype.preloadHUDMakerUltraFonts === 'function' && !sb.prototype.preloadHUDMakerUltraFonts.__sparkWrapped) {
@@ -1327,6 +1515,7 @@
       this._sparkMethod = method || 'GET';
       this._sparkRawUrl = url;
       this._sparkFailed = false;
+      this._sparkIsHUD = /(?:ultra)?hud(?:maker)?.*\.json/i.test(String(url || ''));
 
       var resolvedUrl = url;
       try {
@@ -1354,6 +1543,17 @@
         pendingXHRs[targetUrl] = Date.now();
         var onComplete = function () {
           delete pendingXHRs[targetUrl];
+          if (self._sparkIsHUD) {
+            try {
+              var txt = (typeof self.responseText === 'string') ? self.responseText.trim() : '';
+              if (!txt || txt === '{}' || txt === 'null' || txt === 'undefined') {
+                self._sparkCustomStatus = 200;
+                self._sparkCustomStatusText = 'OK';
+                self._sparkCustomResponseText = '{"data":[]}';
+                self._sparkCustomResponse = (self.responseType === 'json') ? { data: [] } : '{"data":[]}';
+              }
+            } catch (e) {}
+          }
           self.removeEventListener('load', onComplete);
           self.removeEventListener('error', onComplete);
           self.removeEventListener('abort', onComplete);
@@ -1365,7 +1565,23 @@
         self.addEventListener('timeout', onComplete, false);
       }
 
+      if (self._sparkIsHUD) {
+        self.addEventListener('error', function (ev) {
+          self._sparkFailed = false;
+          self._sparkCustomStatus = 200;
+          self._sparkCustomStatusText = 'OK';
+          self._sparkCustomResponseText = '{"data":[]}';
+          self._sparkCustomResponse = (self.responseType === 'json') ? { data: [] } : '{"data":[]}';
+          try {
+            if (typeof self.onload === 'function') {
+              self.onload(ev);
+            }
+          } catch (e) {}
+        }, true);
+      }
+
       self.addEventListener('error', function () {
+        if (self._sparkIsHUD) return;
         self._sparkFailed = true;
         report('resource', 'Failed to load: ' + targetUrl, targetUrl, 0, {
           method: self._sparkMethod,
@@ -1377,11 +1593,66 @@
         return originalSend.apply(this, arguments);
       } catch (err) {
         if (targetUrl) delete pendingXHRs[targetUrl];
+        if (self._sparkIsHUD) {
+          self._sparkFailed = false;
+          self._sparkCustomStatus = 200;
+          self._sparkCustomStatusText = 'OK';
+          self._sparkCustomResponseText = '{"data":[]}';
+          self._sparkCustomResponse = (self.responseType === 'json') ? { data: [] } : '{"data":[]}';
+          return;
+        }
         self._sparkFailed = true;
         report('resource', 'Failed to load: ' + targetUrl + ' (' + (err.message || err) + ')', targetUrl, 0);
         throw err;
       }
     };
+
+    var originalResponseTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
+    var originalResponseDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
+
+    try {
+      Object.defineProperty(XMLHttpRequest.prototype, 'responseText', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          if (typeof this._sparkCustomResponseText !== 'undefined') {
+            return this._sparkCustomResponseText;
+          }
+          if (this._sparkIsHUD && (this._sparkCustomStatus === 200 || this._sparkFailed)) {
+            return '{"data":[]}';
+          }
+          if (originalResponseTextDesc && originalResponseTextDesc.get) {
+            return originalResponseTextDesc.get.call(this);
+          }
+          return '';
+        },
+        set: function (val) {
+          this._sparkCustomResponseText = val;
+        }
+      });
+    } catch (e) {}
+
+    try {
+      Object.defineProperty(XMLHttpRequest.prototype, 'response', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          if (typeof this._sparkCustomResponse !== 'undefined') {
+            return this._sparkCustomResponse;
+          }
+          if (this._sparkIsHUD && (this._sparkCustomStatus === 200 || this._sparkFailed)) {
+            return (this.responseType === 'json') ? { data: [] } : '{"data":[]}';
+          }
+          if (originalResponseDesc && originalResponseDesc.get) {
+            return originalResponseDesc.get.call(this);
+          }
+          return null;
+        },
+        set: function (val) {
+          this._sparkCustomResponse = val;
+        }
+      });
+    } catch (e) {}
 
     Object.defineProperty(XMLHttpRequest.prototype, 'status', {
       configurable: true,
@@ -1389,6 +1660,9 @@
       get: function () {
         if (typeof this._sparkCustomStatus !== 'undefined') {
           return this._sparkCustomStatus;
+        }
+        if (this._sparkIsHUD && this._sparkCustomResponseText) {
+          return 200;
         }
         var rawStatus = 0;
         try {
@@ -2124,6 +2398,12 @@
         var origOnXhrError = dm.onXhrError;
         dm.onXhrError = function (name, src, url) {
           var failedUrl = url || ('data/' + src);
+          var isHUD = (name === '$dataUltraHUD' || name === '$dataHUD' || /hud/i.test(String(name || '')) || /hud/i.test(String(src || '')) || /hud/i.test(String(url || '')));
+          if (isHUD) {
+            window[name || '$dataUltraHUD'] = { data: [] };
+            report('info', 'Recovered missing HUD data file: ' + failedUrl, failedUrl, 0);
+            return;
+          }
           report('resource', 'Failed to load: ' + failedUrl, failedUrl, 0, {
             dataName: name,
             src: src
@@ -2132,6 +2412,50 @@
             return origOnXhrError.apply(this, arguments);
           }
         };
+
+        // Wrap onXhrLoad (MZ)
+        var origOnXhrLoad = dm.onXhrLoad;
+        if (typeof origOnXhrLoad === 'function' && !dm.onXhrLoad.__sparkWrapped) {
+          dm.onXhrLoad = function (xhr, name, src, url) {
+            var isHUD = (name === '$dataUltraHUD' || name === '$dataHUD' || /hud/i.test(String(name || '')) || /hud/i.test(String(src || '')) || /hud/i.test(String(url || '')));
+            try {
+              var res = origOnXhrLoad.apply(this, arguments);
+              if (isHUD) {
+                if (!window[name] || typeof window[name] !== 'object') {
+                  window[name] = { data: [] };
+                } else if (!window[name].data) {
+                  window[name].data = [];
+                }
+              }
+              return res;
+            } catch (e) {
+              if (isHUD) {
+                window[name] = { data: [] };
+                report('info', 'Recovered invalid HUD data in onXhrLoad: ' + (url || src), url || src, 0);
+                return;
+              }
+              throw e;
+            }
+          };
+          dm.onXhrLoad.__sparkWrapped = true;
+        }
+
+        // Wrap loadDataFile (MZ)
+        if (typeof dm.loadDataFile === 'function' && !dm.loadDataFile.__sparkWrapped) {
+          var origLoadDataFile = dm.loadDataFile;
+          dm.loadDataFile = function (name, src) {
+            var isHUD = (name === '$dataUltraHUD' || name === '$dataHUD' || /hud/i.test(String(name || '')) || /hud/i.test(String(src || '')));
+            if (isHUD) {
+              if (!window[name]) {
+                window[name] = { data: [] };
+              } else if (typeof window[name] === 'object' && !window[name].data) {
+                window[name].data = [];
+              }
+            }
+            return origLoadDataFile.apply(this, arguments);
+          };
+          dm.loadDataFile.__sparkWrapped = true;
+        }
 
         // Wrap onError (MV)
         var origOnError = dm.onError;
@@ -2378,6 +2702,7 @@
       patchSceneMap(window.Scene_Map);
     }
     ensureButtonCommonEventsDefaults();
+    ensureHUDDefaults();
     if (window.ImageManager && typeof patchImageManager === 'function') {
       patchImageManager(window.ImageManager);
     }

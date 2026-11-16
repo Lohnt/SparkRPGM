@@ -101,6 +101,90 @@
   window.__sparkBrowserMode = true;
   window._sparkLastError = null;
 
+  // MARK: - nw / nw.gui / nw.Window Stub for Desktop Plugin Compatibility (MZPlus, etc.)
+
+  function initNWStub() {
+    try {
+      if (typeof window.nw === 'undefined' || !window.nw) {
+        var dummyWin = {
+          x: 0,
+          y: 0,
+          width: window.innerWidth || 816,
+          height: window.innerHeight || 624,
+          title: '',
+          isFullScreen: false,
+          show: function () {},
+          hide: function () {},
+          close: function () {},
+          focus: function () {},
+          blur: function () {},
+          maximize: function () {},
+          unmaximize: function () {},
+          minimize: function () {},
+          restore: function () {},
+          enterFullscreen: function () {},
+          leaveFullscreen: function () {},
+          toggleFullscreen: function () {},
+          setProgressBar: function () {},
+          setBadgeLabel: function () {},
+          requestAttention: function () {},
+          moveTo: function () {},
+          moveBy: function () {},
+          resizeTo: function () {},
+          resizeBy: function () {},
+          setAlwaysOnTop: function () {},
+          setPosition: function () {},
+          setShowInTaskbar: function () {},
+          setResizable: function () {},
+          on: function () { return dummyWin; },
+          once: function () { return dummyWin; },
+          addListener: function () { return dummyWin; },
+          removeListener: function () { return dummyWin; },
+          removeAllListeners: function () { return dummyWin; },
+          emit: function () { return true; },
+          crashed: false
+        };
+
+        var nwStub = {
+          App: {
+            argv: [],
+            fullArgv: [],
+            dataPath: '',
+            manifest: {},
+            quit: function () {},
+            closeAllWindows: function () {},
+            on: function () { return this; },
+            once: function () { return this; },
+            removeListener: function () { return this; }
+          },
+          Window: {
+            get: function () {
+              return dummyWin;
+            },
+            open: function () {
+              return dummyWin;
+            }
+          },
+          Screen: {
+            Init: function () {},
+            screens: []
+          },
+          Shell: {
+            openExternal: function () {},
+            openItem: function () {},
+            showItemInFolder: function () {}
+          }
+        };
+
+        window.nw = nwStub;
+        if (typeof window.nwDispatcher === 'undefined') {
+          window.nwDispatcher = {};
+        }
+      }
+    } catch (e) {}
+  }
+  initNWStub();
+
   // MARK: - Gamepad Polyfill for iOS WKWebView file://
 
   try {
@@ -161,6 +245,9 @@
           window._sparkLastError = this;
           var rawStack = '';
           try { rawStack = origStackDesc.get.call(this) || ''; } catch (e) {}
+          if (rawStack) {
+            rawStack = String(rawStack).replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
+          }
           var name = (this && this.name) || 'Error';
           var message = (this && this.message) || '';
           var title = name + (message ? ': ' + message : '');
@@ -191,6 +278,7 @@
     }
     if (typeof err === 'string') {
       var str = err.trim();
+      str = str.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
       if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(str)) {
         return str;
       }
@@ -210,6 +298,7 @@
       var title = name + (message ? ': ' + message : '');
       var stack = err.stack ? String(err.stack).trim() : '';
       if (stack) {
+        stack = stack.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
         // JavaScriptCore on iOS omits the error name and message from stack.
         // Prepend "name: message" if not already present at the start.
         if (stack.indexOf(title) === 0) {
@@ -1223,6 +1312,98 @@
       } catch (err) {
         if (currentLoadBitmap) im.loadBitmap = currentLoadBitmap;
       }
+
+      var currentClear = im.clear;
+      function wrapClear(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            if (!this._cache || typeof this._cache !== 'object') {
+              this._cache = {};
+            }
+            if (typeof fn === 'function') {
+              return fn.apply(this, arguments);
+            }
+            var c = this._cache;
+            for (var k in c) {
+              try {
+                if (c[k] && typeof c[k].destroy === 'function') {
+                  c[k].destroy();
+                }
+              } catch (eDest) {}
+            }
+            this._cache = {};
+          } catch (e) {
+            report('info', 'ImageManager.clear recovered: ' + formatError(e), '', 0);
+            try {
+              var cache = this._cache;
+              if (cache && typeof cache === 'object') {
+                for (var key in cache) {
+                  try {
+                    if (cache[key] && typeof cache[key].destroy === 'function') {
+                      cache[key].destroy();
+                    }
+                  } catch (e2) {}
+                }
+              }
+            } catch (e3) {}
+            this._cache = {};
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentClear === 'function' && !currentClear.__sparkWrapped) {
+        currentClear = wrapClear(currentClear);
+      } else if (!currentClear) {
+        currentClear = wrapClear(null);
+      }
+      try {
+        Object.defineProperty(im, 'clear', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentClear;
+          },
+          set: function (newFn) {
+            currentClear = wrapClear(newFn);
+          }
+        });
+      } catch (err) {
+        im.clear = currentClear;
+      }
+
+      var currentIsReady = im.isReady;
+      function wrapIsReady(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'ImageManager.isReady recovered: ' + formatError(e), '', 0);
+            return true;
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentIsReady === 'function' && !currentIsReady.__sparkWrapped) {
+        currentIsReady = wrapIsReady(currentIsReady);
+      }
+      try {
+        Object.defineProperty(im, 'isReady', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentIsReady;
+          },
+          set: function (newFn) {
+            currentIsReady = wrapIsReady(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentIsReady) im.isReady = currentIsReady;
+      }
     } catch (e) {}
   }
 
@@ -1431,6 +1612,164 @@
         });
       } catch (err) {
         if (currentCCF) sb.prototype.createColorFilter = currentCCF;
+      }
+
+      var currentCreate = sb.prototype.create;
+      function wrapCreate(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.create recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCreate === 'function' && !currentCreate.__sparkWrapped) {
+        currentCreate = wrapCreate(currentCreate);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'create', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCreate;
+          },
+          set: function (newFn) {
+            currentCreate = wrapCreate(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCreate) sb.prototype.create = currentCreate;
+      }
+
+      var currentStart = sb.prototype.start;
+      function wrapStart(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.start recovered: ' + formatError(e), '', 0);
+            this._started = true;
+            this._active = true;
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentStart === 'function' && !currentStart.__sparkWrapped) {
+        currentStart = wrapStart(currentStart);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'start', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentStart;
+          },
+          set: function (newFn) {
+            currentStart = wrapStart(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentStart) sb.prototype.start = currentStart;
+      }
+
+      var currentCWL = sb.prototype.createWindowLayer;
+      function wrapCWL(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.createWindowLayer recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCWL === 'function' && !currentCWL.__sparkWrapped) {
+        currentCWL = wrapCWL(currentCWL);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'createWindowLayer', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCWL;
+          },
+          set: function (newFn) {
+            currentCWL = wrapCWL(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCWL) sb.prototype.createWindowLayer = currentCWL;
+      }
+
+      var currentTerminate = sb.prototype.terminate;
+      function wrapTerminate(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.terminate recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentTerminate === 'function' && !currentTerminate.__sparkWrapped) {
+        currentTerminate = wrapTerminate(currentTerminate);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'terminate', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentTerminate;
+          },
+          set: function (newFn) {
+            currentTerminate = wrapTerminate(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentTerminate) sb.prototype.terminate = currentTerminate;
+      }
+
+      var currentIsReady = sb.prototype.isReady;
+      function wrapIsReady(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.isReady recovered: ' + formatError(e), '', 0);
+            return true;
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentIsReady === 'function' && !currentIsReady.__sparkWrapped) {
+        currentIsReady = wrapIsReady(currentIsReady);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'isReady', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentIsReady;
+          },
+          set: function (newFn) {
+            currentIsReady = wrapIsReady(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentIsReady) sb.prototype.isReady = currentIsReady;
       }
     } catch (e) {}
   }
@@ -2959,6 +3298,9 @@
     }
     ensureButtonCommonEventsDefaults();
     ensureHUDDefaults();
+    if (typeof initNWStub === 'function') {
+      initNWStub();
+    }
     if (window.ImageManager && typeof patchImageManager === 'function') {
       patchImageManager(window.ImageManager);
     }
@@ -3009,15 +3351,19 @@
     var isRawStack = (msgStr.indexOf('@file:///') !== -1 ||
                       msgStr.indexOf('file:///') === 0 ||
                       msgStr.indexOf('@') === 0 ||
+                      msgStr.indexOf('$1@') !== -1 ||
                       (msgStr.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(msgStr)));
 
-    if (isRawStack && window._sparkLastError) {
-      var lastErr = window._sparkLastError;
-      var lastTitle = (lastErr.name || 'Error') + (lastErr.message ? ': ' + lastErr.message : '');
-      if (msgStr.indexOf(lastTitle) !== 0) {
-        return lastTitle + '\n' + msgStr;
+    if (isRawStack) {
+      msgStr = msgStr.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
+      if (window._sparkLastError) {
+        var lastErr = window._sparkLastError;
+        var lastTitle = (lastErr.name || 'Error') + (lastErr.message ? ': ' + lastErr.message : '');
+        if (msgStr.indexOf(lastTitle) !== 0) {
+          return lastTitle + '\n' + msgStr;
+        }
+        return msgStr;
       }
-      return msgStr;
     }
 
     if (nameStr && msgStr) {
@@ -3045,11 +3391,14 @@
           if (typeof fn === 'function') {
             try {
               var callMsg = message;
-              if (window._sparkLastError && typeof message === 'string' && (message.indexOf('@file:///') !== -1 || message.indexOf('file:///') === 0 || message.indexOf('@') === 0 || (message.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)))) {
+              if (window._sparkLastError && typeof message === 'string' && (message.indexOf('@file:///') !== -1 || message.indexOf('file:///') === 0 || message.indexOf('@') === 0 || message.indexOf('$1@') !== -1 || (message.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)))) {
                 var lErr = window._sparkLastError;
                 var lTitle = (lErr.name || 'Error') + (lErr.message ? ': ' + lErr.message : '');
-                if (message.indexOf(lTitle) !== 0) {
-                  callMsg = lTitle + '\n' + message;
+                var cleanMsg = message.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
+                if (cleanMsg.indexOf(lTitle) !== 0) {
+                  callMsg = lTitle + '\n' + cleanMsg;
+                } else {
+                  callMsg = cleanMsg;
                 }
               }
               return fn.call(this, name, callMsg, error);
@@ -3310,6 +3659,16 @@
             if (this._nextScene) {
               this._scene = this._nextScene;
               this._nextScene = null;
+              try {
+                if (this._scene && typeof this._scene.create === 'function') {
+                  this._scene.create();
+                }
+              } catch (eCreate) {}
+              try {
+                if (typeof this.onSceneCreate === 'function') {
+                  this.onSceneCreate();
+                }
+              } catch (eOnCreate) {}
             }
           }
         };
@@ -3562,6 +3921,7 @@
   var enginePollAttempts = 0;
   var enginePollTimer = setInterval(function () {
     enginePollAttempts += 1;
+    if (typeof initNWStub === 'function') initNWStub();
     if (window.Utils) patchUtilsInstance(window.Utils);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
     if (window.Graphics) {

@@ -402,7 +402,7 @@
     });
   } catch (e) {}
 
-  // MARK: - Game_BattlerBase & Game_Actor Trait Objects Sanitizer
+  // MARK: - Game_BattlerBase & Game_Actor Trait Objects & States Sanitizer
 
   function patchGameBattlerBase(gbb) {
     if (!gbb || !gbb.prototype) return;
@@ -428,6 +428,27 @@
     } catch (e) {}
 
     try {
+      if (typeof gbb.prototype.states === 'function' && !gbb.prototype.states.__sparkWrapped) {
+        var origStates = gbb.prototype.states;
+        var wrappedStates = function () {
+          try {
+            var list = origStates.call(this);
+            if (Array.isArray(list)) {
+              return list.filter(function (s) {
+                return s && typeof s === 'object';
+              });
+            }
+            return [];
+          } catch (e) {
+            return [];
+          }
+        };
+        wrappedStates.__sparkWrapped = true;
+        gbb.prototype.states = wrappedStates;
+      }
+    } catch (e) {}
+
+    try {
       if (typeof gbb.prototype.allTraits === 'function' && !gbb.prototype.allTraits.__sparkWrapped) {
         var origAllTraits = gbb.prototype.allTraits;
         var wrappedAllTraits = function () {
@@ -449,6 +470,105 @@
         gbb.prototype.allTraits = wrappedAllTraits;
       }
     } catch (e) {}
+
+    try {
+      if (typeof gbb.prototype.param === 'function' && !gbb.prototype.param.__sparkWrapped) {
+        var origParam = gbb.prototype.param;
+        var wrappedParam = function (paramId) {
+          try {
+            return origParam.call(this, paramId);
+          } catch (e) {
+            try {
+              var base = (typeof this.paramBase === 'function') ? this.paramBase(paramId) : (paramId === 0 ? 500 : 10);
+              var plus = (typeof this.paramPlus === 'function') ? this.paramPlus(paramId) : 0;
+              return base + plus;
+            } catch (e2) {
+              return paramId === 0 ? 500 : 10;
+            }
+          }
+        };
+        wrappedParam.__sparkWrapped = true;
+        gbb.prototype.param = wrappedParam;
+      }
+    } catch (e) {}
+  }
+
+  function patchGameActor(ga) {
+    if (!ga || !ga.prototype) return;
+    patchGameBattlerBase(ga);
+
+    try {
+      if (typeof ga.prototype.equips === 'function' && !ga.prototype.equips.__sparkWrapped) {
+        var origEquips = ga.prototype.equips;
+        var wrappedEquips = function () {
+          try {
+            var list = origEquips.call(this);
+            if (Array.isArray(list)) {
+              return list.map(function (eq) {
+                return (eq && typeof eq === 'object') ? eq : null;
+              });
+            }
+            return [];
+          } catch (e) {
+            return [];
+          }
+        };
+        wrappedEquips.__sparkWrapped = true;
+        ga.prototype.equips = wrappedEquips;
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof ga.prototype.paramBase === 'function' && !ga.prototype.paramBase.__sparkWrapped) {
+        var origParamBase = ga.prototype.paramBase;
+        var wrappedParamBase = function (paramId) {
+          try {
+            var c = typeof this.currentClass === 'function' ? this.currentClass() : null;
+            if (c && c.params && Array.isArray(c.params[paramId])) {
+              var lvl = typeof this._level === 'number' ? this._level : 1;
+              var val = c.params[paramId][lvl];
+              if (typeof val === 'number') return val;
+            }
+            return origParamBase.call(this, paramId);
+          } catch (e) {
+            return paramId === 0 ? 500 : (paramId === 1 ? 100 : 10);
+          }
+        };
+        wrappedParamBase.__sparkWrapped = true;
+        ga.prototype.paramBase = wrappedParamBase;
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof ga.prototype.paramPlus === 'function' && !ga.prototype.paramPlus.__sparkWrapped) {
+        var origParamPlus = ga.prototype.paramPlus;
+        var wrappedParamPlus = function (paramId) {
+          try {
+            return origParamPlus.call(this, paramId);
+          } catch (e) {
+            return 0;
+          }
+        };
+        wrappedParamPlus.__sparkWrapped = true;
+        ga.prototype.paramPlus = wrappedParamPlus;
+      }
+    } catch (e) {}
+  }
+
+  function patchSceneBoot(sb) {
+    if (!sb || !sb.prototype) return;
+    try {
+      if (typeof sb.prototype.onDatabaseLoaded === 'function' && !sb.prototype.onDatabaseLoaded.__sparkWrapped) {
+        var origOnDbLoaded = sb.prototype.onDatabaseLoaded;
+        var wrappedOnDbLoaded = function () {
+          this._sparkOnDatabaseLoadedDone = true;
+          this._databaseLoaded = true;
+          return origOnDbLoaded.apply(this, arguments);
+        };
+        wrappedOnDbLoaded.__sparkWrapped = true;
+        sb.prototype.onDatabaseLoaded = wrappedOnDbLoaded;
+      }
+    } catch (e) {}
   }
 
   var rawGameBattlerBase = window.Game_BattlerBase;
@@ -468,7 +588,7 @@
   } catch (e) {}
 
   var rawGameActor = window.Game_Actor;
-  if (rawGameActor) patchGameBattlerBase(rawGameActor);
+  if (rawGameActor) patchGameActor(rawGameActor);
   try {
     Object.defineProperty(window, 'Game_Actor', {
       configurable: true,
@@ -478,7 +598,23 @@
       },
       set: function (val) {
         rawGameActor = val;
-        patchGameBattlerBase(val);
+        patchGameActor(val);
+      }
+    });
+  } catch (e) {}
+
+  var rawSceneBoot = window.Scene_Boot;
+  if (rawSceneBoot) patchSceneBoot(rawSceneBoot);
+  try {
+    Object.defineProperty(window, 'Scene_Boot', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawSceneBoot;
+      },
+      set: function (val) {
+        rawSceneBoot = val;
+        patchSceneBoot(val);
       }
     });
   } catch (e) {}
@@ -1470,7 +1606,13 @@
       patchGameBattlerBase(window.Game_BattlerBase);
     }
     if (window.Game_Actor) {
-      patchGameBattlerBase(window.Game_Actor);
+      patchGameActor(window.Game_Actor);
+    }
+    if (window.Scene_Boot) {
+      patchSceneBoot(window.Scene_Boot);
+    }
+    if (window.SceneManager) {
+      patchSceneManagerInstance(window.SceneManager);
     }
   }
 
@@ -1487,12 +1629,13 @@
 
       var origPrintError = gfx.printError;
       gfx.printError = function (name, message, error) {
-        var errName = name || (error && error.name) || 'Error';
-        var errMsg = message || (error && error.message) || '';
-        var title = errName + (errMsg ? ': ' + errMsg : '');
-        var formatted = error ? formatError(error) : title;
-        if (formatted.indexOf(title) !== 0) {
-          formatted = title + '\n' + formatted;
+        var formatted = '';
+        if (error) {
+          formatted = formatError(error);
+        } else if (message) {
+          formatted = formatError(message);
+        } else {
+          formatted = formatError(name || 'Unknown graphics error');
         }
         report('graphics.error', formatted, '', 0);
         if (origPrintError) {
@@ -1506,7 +1649,7 @@
     patchGraphicsInstance(window.Graphics);
   }
 
-  // SceneManager: run hook, catchNormalError, and catchException reporting
+  // SceneManager: run hook, onError, catchNormalError, and catchException reporting
   function patchSceneManagerInstance(sm) {
     if (!sm || (typeof sm !== 'object' && typeof sm !== 'function')) return;
     try {
@@ -1515,7 +1658,7 @@
         var wrappedRun = function (sceneClass) {
           try {
             reapplyStorageAndDataManagerPatches();
-      syncLoadingSpinner();
+            syncLoadingSpinner();
           } catch (e) {}
           return origRun.apply(this, arguments);
         };
@@ -1523,33 +1666,65 @@
         sm.run = wrappedRun;
       }
 
-      if (!sm.__sparkErrorPatched) {
-        sm.__sparkErrorPatched = true;
+      if (typeof sm.onError === 'function' && !sm.onError.__sparkWrapped) {
+        var origOnError = sm.onError;
+        var wrappedOnError = function (e) {
+          var errorObj = (e && e.error) ? e.error : e;
+          var formatted = formatError(errorObj);
+          var file = (e && (e.filename || e.fileName)) || '';
+          var line = (e && (e.lineno || e.lineNumber)) || 0;
+          report('engine.error', formatted, file, line);
+          if (origOnError) {
+            return origOnError.apply(this, arguments);
+          }
+        };
+        wrappedOnError.__sparkWrapped = true;
+        sm.onError = wrappedOnError;
+      }
 
+      if (typeof sm.catchNormalError === 'function' && !sm.catchNormalError.__sparkWrapped) {
         var origCatchNormalError = sm.catchNormalError;
-        sm.catchNormalError = function (e) {
+        var wrappedCatchNormalError = function (e) {
           var formatted = formatError(e);
           report('engine.error', formatted, '', 0);
           if (origCatchNormalError) {
             return origCatchNormalError.apply(this, arguments);
           }
         };
+        wrappedCatchNormalError.__sparkWrapped = true;
+        sm.catchNormalError = wrappedCatchNormalError;
+      }
 
+      if (typeof sm.catchException === 'function' && !sm.catchException.__sparkWrapped) {
         var origCatchException = sm.catchException;
-        sm.catchException = function (e) {
+        var wrappedCatchException = function (e) {
           var formatted = formatError(e);
           report('engine.error', formatted, '', 0);
           if (origCatchException) {
             return origCatchException.apply(this, arguments);
           }
         };
+        wrappedCatchException.__sparkWrapped = true;
+        sm.catchException = wrappedCatchException;
       }
     } catch (e) {}
   }
 
-  if (typeof window.SceneManager !== 'undefined') {
-    patchSceneManagerInstance(window.SceneManager);
-  }
+  var rawSceneManager = window.SceneManager;
+  if (rawSceneManager) patchSceneManagerInstance(rawSceneManager);
+  try {
+    Object.defineProperty(window, 'SceneManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawSceneManager;
+      },
+      set: function (val) {
+        rawSceneManager = val;
+        patchSceneManagerInstance(val);
+      }
+    });
+  } catch (e) {}
 
   // MARK: - iOS 15 WebM Video & FontManager Fallback Hooks
 
@@ -1894,11 +2069,16 @@
     // If Scene_Boot is active when DB and GlobalInfo are already loaded, along with fonts and images:
     // CRITICAL: Scene_Boot must NOT be force-advanced until EVERY database file in DataManager._databaseFiles is truthy.
     if (sceneName === 'Scene_Boot' && dbBool === true && giBool === true && fmReady && imReady && allDbFilesLoaded) {
-      if (scene && !scene._databaseLoaded) {
-        scene._databaseLoaded = true;
+      if (scene && !scene._sparkOnDatabaseLoadedDone) {
         if (typeof scene.onDatabaseLoaded === 'function') {
+          scene._sparkOnDatabaseLoadedDone = true;
+          scene._databaseLoaded = true;
           report('info', 'Watchdog: calling scene.onDatabaseLoaded() for Scene_Boot', '', 0);
-          try { scene.onDatabaseLoaded(); } catch (e) {}
+          try {
+            scene.onDatabaseLoaded();
+          } catch (e) {
+            report('info', 'Watchdog: scene.onDatabaseLoaded() threw: ' + formatError(e), '', 0);
+          }
         }
       }
 
@@ -1919,6 +2099,13 @@
           var currentScene = currentSm && (currentSm._scene || currentSm._nextScene);
           var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
           if (curName === 'Scene_Boot') {
+            // NEVER bypass Scene_Boot.prototype.onDatabaseLoaded()!
+            if (currentScene && typeof currentScene.onDatabaseLoaded === 'function' && !currentScene._sparkOnDatabaseLoadedDone) {
+              currentScene._sparkOnDatabaseLoadedDone = true;
+              currentScene._databaseLoaded = true;
+              report('info', 'Watchdog ensuring onDatabaseLoaded() runs before advancing Scene_Boot', '', 0);
+              try { currentScene.onDatabaseLoaded(); } catch (e) {}
+            }
             report('info', 'Watchdog force-advancing Scene_Boot -> Scene_Title', '', 0);
             try {
               if (typeof currentScene.resizeScreen === 'function') {
@@ -1979,6 +2166,34 @@
 
     if (now - stallStartTime >= 2500) {
       syncLoadingSpinner();
+
+      if (sceneName === 'Scene_Boot' && scene) {
+        var bootReasons = [];
+        bootReasons.push('dbLoadedFlag=' + !!scene._databaseLoaded);
+        if (dm) {
+          try {
+            if (typeof dm.isDatabaseLoaded === 'function') {
+              bootReasons.push('dm.isDatabaseLoaded=' + dm.isDatabaseLoaded());
+            }
+          } catch (e) { bootReasons.push('dm.isDatabaseLoaded=err'); }
+        }
+        if (typeof scene.isPlayerDataLoaded === 'function') {
+          try { bootReasons.push('isPlayerDataLoaded=' + scene.isPlayerDataLoaded()); } catch (e) { bootReasons.push('isPlayerDataLoaded=err'); }
+        }
+        if (typeof scene.isCustomFontLoaded === 'function') {
+          try { bootReasons.push('isCustomFontLoaded=' + scene.isCustomFontLoaded()); } catch (e) { bootReasons.push('isCustomFontLoaded=err'); }
+        }
+        if (fm && typeof fm.isReady === 'function') {
+          try { bootReasons.push('FontManager.isReady=' + fm.isReady()); } catch (e) {}
+        }
+        if (im && typeof im.isReady === 'function') {
+          try { bootReasons.push('ImageManager.isReady=' + im.isReady()); } catch (e) {}
+        }
+        if (typeof scene.isReady === 'function') {
+          try { bootReasons.push('Scene_Boot.isReady=' + scene.isReady()); } catch (e) { bootReasons.push('Scene_Boot.isReady=err'); }
+        }
+        report('info', 'Scene_Boot stall diagnosis (>2.5s): ' + bootReasons.join(', '), '', 0);
+      }
 
       if (sceneName === 'Scene_Boot' && dbBool === true && (!dm || !dm.isGlobalInfoLoaded || !dm.isGlobalInfoLoaded())) {
         if (dm) {

@@ -226,11 +226,8 @@ struct GamePlayerView: View {
     }
 
     private var diagnosticDetail: String? {
-        guard !session.missingResources.isEmpty else { return session.bootDiagnostic }
-        var lines = session.missingResources.suffix(6).map { "Missing file: \($0)" }
-        if let diagnostic = session.bootDiagnostic {
-            lines.insert(diagnostic, at: 0)
-        }
+        guard !session.missingResources.isEmpty else { return nil }
+        let lines = session.missingResources.suffix(6).map { "Missing file: \($0)" }
         return lines.joined(separator: "\n")
     }
 
@@ -275,6 +272,7 @@ struct GamePlayerView: View {
 
                     HStack(spacing: 10) {
                         overlayButton("Retry", highlighted: false) {
+                            session.dismissDiagnostic()
                             session.loadGame()
                         }
                         overlayButton("Close", highlighted: true) {
@@ -497,9 +495,12 @@ struct GamePlayerView: View {
             traceParts.append(lines.dropFirst().joined(separator: "\n"))
         }
         if let d = detail, !d.isEmpty {
-            let filteredDetail = d.replacingOccurrences(of: message, with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !filteredDetail.isEmpty && !traceParts.contains(filteredDetail) {
-                traceParts.append(filteredDetail)
+            let detailLines = d.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            let newDetailLines = detailLines.filter { line in
+                line != headline && !traceParts.contains(where: { $0.contains(line) })
+            }
+            if !newDetailLines.isEmpty {
+                traceParts.append(newDetailLines.joined(separator: "\n"))
             }
         }
         let trace = traceParts.isEmpty ? nil : traceParts.joined(separator: "\n\n")
@@ -918,6 +919,8 @@ struct GamePlayerView: View {
     private func configureOnce() {
         guard !didConfigure else { return }
         didConfigure = true
+        hasCopiedError = false
+        session.dismissDiagnostic()
         AudioSessionConfigurator.activate()
         OrientationManager.shared.apply(controls.config.orientation)
         store.markPlayed(game)
@@ -1020,6 +1023,7 @@ struct WebViewHost: UIViewRepresentable {
         if context.coordinator.loadedURL != target || context.coordinator.loadedGameID != session.game.id {
             context.coordinator.loadedURL = target
             context.coordinator.loadedGameID = session.game.id
+            session.dismissDiagnostic()
             session.loadGame()
         }
         return view
@@ -1030,6 +1034,7 @@ struct WebViewHost: UIViewRepresentable {
         if context.coordinator.loadedURL != target || context.coordinator.loadedGameID != session.game.id {
             context.coordinator.loadedURL = target
             context.coordinator.loadedGameID = session.game.id
+            session.dismissDiagnostic()
             session.loadGame()
         }
     }

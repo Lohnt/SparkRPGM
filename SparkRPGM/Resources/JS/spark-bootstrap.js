@@ -13,6 +13,7 @@
   'use strict';
 
   var cfg = window.__SPARK_CONFIG__ || {};
+  var sparkBootstrapLaunchTime = Date.now();
   var reported = Object.create(null);
   var reportCount = 0;
   var MAX_REPORTS = 30;
@@ -1194,9 +1195,24 @@
         var origStart = sb.prototype.start;
         var wrappedStart = function () {
           try {
-            return origStart.apply(this, arguments);
+            var res = origStart.apply(this, arguments);
+            if (window.SceneManager && window.SceneManager._scene === this && !window.SceneManager._nextScene) {
+              var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
+              if (targetScene && typeof window.SceneManager.goto === 'function') {
+                try { window.SceneManager.goto(targetScene); } catch (eGo) {}
+              }
+            }
+            return res;
           } catch (e) {
             report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
+            try {
+              if (window.SceneManager) {
+                var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
+                if (target && typeof window.SceneManager.goto === 'function') {
+                  window.SceneManager.goto(target);
+                }
+              }
+            } catch (e2) {}
           }
         };
         wrappedStart.__sparkWrapped = true;
@@ -1207,7 +1223,20 @@
         var origIsReady = sb.prototype.isReady;
         var wrappedIsReady = function () {
           try {
-            return origIsReady.apply(this, arguments);
+            var ready = origIsReady.apply(this, arguments);
+            if (ready) return true;
+            var dm = window.DataManager;
+            if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
+              if (!this._sparkDbLoadedTime) {
+                this._sparkDbLoadedTime = Date.now();
+              } else if (Date.now() - this._sparkDbLoadedTime > 1500) {
+                if (window.Graphics && typeof window.Graphics.endLoading === 'function') {
+                  try { window.Graphics.endLoading(); } catch (eGL) {}
+                }
+                return true;
+              }
+            }
+            return ready;
           } catch (e) {
             report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
             return true;
@@ -1770,6 +1799,95 @@
         });
       } catch (err) {
         if (currentIsReady) sb.prototype.isReady = currentIsReady;
+      }
+
+      var currentStartFadeIn = sb.prototype.startFadeIn;
+      function wrapStartFadeIn(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function (duration, white) {
+          try {
+            var res = fn.apply(this, arguments);
+            var self = this;
+            var dur = (typeof duration === 'number' && duration > 0) ? duration : 30;
+            setTimeout(function () {
+              try {
+                if (self && self._fadeSign > 0 && self._fadeOpacity > 0) {
+                  self._fadeOpacity = 0;
+                  self._fadeDuration = 0;
+                  self._fadeSign = 0;
+                  if (typeof self.updateColorFilter === 'function') {
+                    self.updateColorFilter();
+                  }
+                }
+              } catch (e) {}
+            }, Math.max(500, dur * 25 + 200));
+            return res;
+          } catch (e) {
+            report('info', 'Scene_Base.startFadeIn recovered: ' + formatError(e), '', 0);
+            this._fadeOpacity = 0;
+            this._fadeDuration = 0;
+            this._fadeSign = 0;
+            try {
+              if (typeof this.updateColorFilter === 'function') this.updateColorFilter();
+            } catch (e2) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentStartFadeIn === 'function' && !currentStartFadeIn.__sparkWrapped) {
+        currentStartFadeIn = wrapStartFadeIn(currentStartFadeIn);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'startFadeIn', {
+          configurable: true,
+          enumerable: true,
+          get: function () { return currentStartFadeIn; },
+          set: function (newFn) { currentStartFadeIn = wrapStartFadeIn(newFn); }
+        });
+      } catch (err) {
+        if (currentStartFadeIn) sb.prototype.startFadeIn = currentStartFadeIn;
+      }
+
+      var currentUpdateFade = sb.prototype.updateFade;
+      function wrapUpdateFade(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            fn.apply(this, arguments);
+            if (this._fadeDuration <= 0 && this._fadeSign > 0) {
+              if (this._fadeOpacity !== 0) {
+                this._fadeOpacity = 0;
+                this._fadeSign = 0;
+                if (typeof this.updateColorFilter === 'function') {
+                  this.updateColorFilter();
+                }
+              }
+            }
+          } catch (e) {
+            this._fadeOpacity = 0;
+            this._fadeDuration = 0;
+            this._fadeSign = 0;
+            try {
+              if (typeof this.updateColorFilter === 'function') this.updateColorFilter();
+            } catch (e2) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentUpdateFade === 'function' && !currentUpdateFade.__sparkWrapped) {
+        currentUpdateFade = wrapUpdateFade(currentUpdateFade);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'updateFade', {
+          configurable: true,
+          enumerable: true,
+          get: function () { return currentUpdateFade; },
+          set: function (newFn) { currentUpdateFade = wrapUpdateFade(newFn); }
+        });
+      } catch (err) {
+        if (currentUpdateFade) sb.prototype.updateFade = currentUpdateFade;
       }
     } catch (e) {}
   }
@@ -3433,12 +3551,51 @@
     } catch (e) {}
   }
 
+  function ensureCanvasVisible() {
+    try {
+      var canvas = document.getElementById('gameCanvas') || (window.Graphics && window.Graphics._canvas);
+      if (canvas) {
+        if (canvas.style) {
+          if (canvas.style.display === 'none') canvas.style.display = 'block';
+          if (canvas.style.visibility === 'hidden') canvas.style.visibility = 'visible';
+          if (canvas.style.opacity === '0') canvas.style.opacity = '1';
+        }
+        var gfx = window.Graphics;
+        if (gfx) {
+          var w = gfx._width || gfx.width || 816;
+          var h = gfx._height || gfx.height || 624;
+          if ((!canvas.width || canvas.width === 0) && w > 0) canvas.width = w;
+          if ((!canvas.height || canvas.height === 0) && h > 0) canvas.height = h;
+        }
+      }
+    } catch (e) {}
+  }
+
+  function hookGraphicsInitialize(gfx) {
+    if (!gfx || typeof gfx.initialize !== 'function' || gfx.initialize.__sparkWrapped) return;
+    var origInit = gfx.initialize;
+    var wrappedInit = function () {
+      try {
+        var res = origInit.apply(this, arguments);
+        ensureCanvasVisible();
+        return res;
+      } catch (e) {
+        report('info', 'Graphics.initialize error: ' + formatError(e), '', 0);
+        throw e;
+      }
+    };
+    wrappedInit.__sparkWrapped = true;
+    gfx.initialize = wrappedInit;
+  }
+
   function patchGraphicsInstance(gfx) {
     hookGraphicsPrintError(gfx);
+    hookGraphicsInitialize(gfx);
+    ensureCanvasVisible();
   }
 
   if (typeof window.Graphics !== 'undefined') {
-    hookGraphicsPrintError(window.Graphics);
+    patchGraphicsInstance(window.Graphics);
   }
 
   function hookSceneManagerErrors(sm) {
@@ -3925,8 +4082,10 @@
     if (window.Utils) patchUtilsInstance(window.Utils);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
     if (window.Graphics) {
+      if (typeof patchGraphicsInstance === 'function') patchGraphicsInstance(window.Graphics);
       if (typeof hookGraphicsPrintError === 'function') hookGraphicsPrintError(window.Graphics);
       hookGraphicsVideo(window.Graphics);
+      if (typeof ensureCanvasVisible === 'function') ensureCanvasVisible();
     }
     if (window.SceneManager) {
       if (typeof patchSceneManagerInstance === 'function') patchSceneManagerInstance(window.SceneManager);
@@ -4083,6 +4242,7 @@
     if (!sm && !gfx) return;
 
     syncLoadingSpinner();
+    ensureCanvasVisible();
 
     var scene = (sm && (sm._scene || sm._nextScene)) || null;
     var sceneName = (scene && scene.constructor && scene.constructor.name) || 'Scene_Boot';
@@ -4150,77 +4310,88 @@
     var imReady = im && typeof im.isReady === 'function' ? im.isReady() : true;
 
     // Scene_Boot Force-Advance Guard:
-    // If Scene_Boot is active when DB and GlobalInfo are already loaded, along with fonts and images:
-    // CRITICAL: Scene_Boot must NOT be force-advanced until EVERY database file in DataManager._databaseFiles is truthy.
-    if (sceneName === 'Scene_Boot' && dbBool === true && giBool === true && fmReady && imReady && allDbFilesLoaded) {
-      if (scene && !scene._sparkOnDatabaseLoadedDone) {
-        if (typeof scene.onDatabaseLoaded === 'function') {
+    // Once DataManager.isDatabaseLoaded() is true (all $data* globals populated) for > 1.5s while SceneManager._scene instanceof Scene_Boot,
+    // automatically call Graphics.endLoading(), ensure Scene_Boot.prototype.onDatabaseLoaded has run,
+    // and if SceneManager._scene is STILL Scene_Boot 1.0s later, explicitly invoke SceneManager.goto(Scene_Title)
+    var isSceneBoot = (sceneName === 'Scene_Boot') || (scene && (scene instanceof (window.Scene_Boot || Object)));
+    if (isSceneBoot && (dbBool === true || allDbFilesLoaded)) {
+      if (!window.__sparkBootDbLoadedStart) {
+        window.__sparkBootDbLoadedStart = Date.now();
+      } else if (Date.now() - window.__sparkBootDbLoadedStart > 1500) {
+        // Automatically call Graphics.endLoading()
+        if (gfx && typeof gfx.endLoading === 'function') {
+          try { gfx.endLoading(); } catch (eGL) {}
+        }
+
+        // Ensure Scene_Boot.prototype.onDatabaseLoaded has run
+        if (scene && !scene._sparkOnDatabaseLoadedDone) {
           scene._sparkOnDatabaseLoadedDone = true;
           scene._databaseLoaded = true;
           report('info', 'Watchdog: calling scene.onDatabaseLoaded() for Scene_Boot', '', 0);
           try {
-            scene.onDatabaseLoaded();
+            if (typeof scene.onDatabaseLoaded === 'function') {
+              scene.onDatabaseLoaded();
+            }
           } catch (e) {
             report('info', 'Watchdog: scene.onDatabaseLoaded() threw: ' + formatError(e), '', 0);
           }
         }
-      }
 
-      if (!window.__sparkBootForceAdvanceTimer) {
-        window.__sparkBootForceAdvanceTimer = setTimeout(function () {
-          window.__sparkBootForceAdvanceTimer = null;
-          var currentDm = window.DataManager;
-          if (currentDm && Array.isArray(currentDm._databaseFiles)) {
-            for (var i = 0; i < currentDm._databaseFiles.length; i++) {
-              var f = currentDm._databaseFiles[i];
-              if (f && f.name && !window[f.name]) {
-                report('info', 'Watchdog cancelled Scene_Boot force-advance: ' + f.name + ' not loaded', '', 0);
-                return;
-              }
-            }
-          }
-          var currentSm = window.SceneManager;
-          var currentScene = currentSm && (currentSm._scene || currentSm._nextScene);
-          var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
-          if (curName === 'Scene_Boot') {
-            // NEVER bypass Scene_Boot.prototype.onDatabaseLoaded()!
-            if (currentScene && typeof currentScene.onDatabaseLoaded === 'function' && !currentScene._sparkOnDatabaseLoadedDone) {
-              currentScene._sparkOnDatabaseLoadedDone = true;
-              currentScene._databaseLoaded = true;
-              report('info', 'Watchdog ensuring onDatabaseLoaded() runs before advancing Scene_Boot', '', 0);
-              try { currentScene.onDatabaseLoaded(); } catch (e) {}
-            }
-            report('info', 'Watchdog force-advancing Scene_Boot -> Scene_Title', '', 0);
-            try {
-              if (typeof currentScene.resizeScreen === 'function') {
-                try { currentScene.resizeScreen(); } catch (e) {}
-              }
-              if (typeof currentScene.updateDocumentTitle === 'function') {
-                try { currentScene.updateDocumentTitle(); } catch (e) {}
-              }
-              if (typeof currentScene.start === 'function') {
-                currentScene.start();
-              }
-            } catch (e) {}
+        // Ensure global info is populated so isPlayerDataLoaded doesn't stall
+        if (dm && (!dm._globalInfo || !Array.isArray(dm._globalInfo))) {
+          dm._globalInfo = [];
+        }
 
-            setTimeout(function () {
-              var smAfter = window.SceneManager;
-              var scAfter = smAfter && (smAfter._scene || smAfter._nextScene);
-              var nameAfter = (scAfter && scAfter.constructor && scAfter.constructor.name) || '';
-              if (nameAfter === 'Scene_Boot') {
-                var targetScene = window.Scene_Title || null;
-                if (targetScene && typeof smAfter.goto === 'function') {
-                  report('info', 'SceneManager.goto(Scene_Title) force-transition triggered', '', 0);
-                  try { smAfter.goto(targetScene); } catch (e) {}
+        // If SceneManager._scene is STILL Scene_Boot 1.0s later, explicitly invoke SceneManager.goto(Scene_Title)
+        if (!window.__sparkBootForceAdvanceTimer) {
+          window.__sparkBootForceAdvanceTimer = setTimeout(function () {
+            window.__sparkBootForceAdvanceTimer = null;
+            var currentSm = window.SceneManager;
+            var currentScene = currentSm && (currentSm._scene || currentSm._nextScene);
+            var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
+            if (curName === 'Scene_Boot' || (currentScene && (currentScene instanceof (window.Scene_Boot || Object)))) {
+              report('info', 'Watchdog force-advancing Scene_Boot -> Scene_Title', '', 0);
+              try {
+                if (typeof currentScene.resizeScreen === 'function') {
+                  try { currentScene.resizeScreen(); } catch (e) {}
                 }
-              }
-            }, 200);
-          }
-        }, 1000);
+                if (typeof currentScene.updateDocumentTitle === 'function') {
+                  try { currentScene.updateDocumentTitle(); } catch (e) {}
+                }
+                if (typeof currentScene.start === 'function' && !currentScene._started) {
+                  currentScene.start();
+                }
+              } catch (e) {}
+
+              setTimeout(function () {
+                var smAfter = window.SceneManager;
+                var scAfter = smAfter && (smAfter._scene || smAfter._nextScene);
+                var nameAfter = (scAfter && scAfter.constructor && scAfter.constructor.name) || '';
+                if (nameAfter === 'Scene_Boot' || (scAfter && (scAfter instanceof (window.Scene_Boot || Object)))) {
+                  var targetScene = null;
+                  if (window.Scene_Splash && typeof window.Scene_Splash === 'function') {
+                    targetScene = window.Scene_Splash;
+                  } else if (window._mog_splash_screen && typeof window._mog_splash_screen === 'function') {
+                    targetScene = window._mog_splash_screen;
+                  } else {
+                    targetScene = window.Scene_Title || null;
+                  }
+                  if (targetScene && typeof smAfter.goto === 'function') {
+                    report('info', 'SceneManager.goto(' + (targetScene.name || 'Scene_Title') + ') force-transition triggered', '', 0);
+                    try { smAfter.goto(targetScene); } catch (e) {}
+                  }
+                }
+              }, 300);
+            }
+          }, 1000);
+        }
       }
-    } else if (!allDbFilesLoaded && window.__sparkBootForceAdvanceTimer) {
-      clearTimeout(window.__sparkBootForceAdvanceTimer);
-      window.__sparkBootForceAdvanceTimer = null;
+    } else {
+      window.__sparkBootDbLoadedStart = null;
+      if (!allDbFilesLoaded && window.__sparkBootForceAdvanceTimer) {
+        clearTimeout(window.__sparkBootForceAdvanceTimer);
+        window.__sparkBootForceAdvanceTimer = null;
+      }
     }
 
     var isSceneReady = true;
@@ -4232,12 +4403,36 @@
       }
     }
 
-    var loadingCount = (gfx && typeof gfx._loadingCount === 'number') ? gfx._loadingCount : 0;
-    var videoLoading = !!((window.Video && window.Video._loading) || (gfx && gfx._videoLoading));
-
-    var isStalled = (loadingCount > 0) || (scene && !isSceneReady) || videoLoading;
-
     var now = Date.now();
+
+    // Unstick fadeOpacity if scene is started but opacity remains > 0 for > 1.5s
+    if (scene && scene._started && scene._fadeOpacity > 0 && scene._fadeSign >= 0) {
+      if (!scene._sparkFadeStuckTime) {
+        scene._sparkFadeStuckTime = now;
+      } else if (now - scene._sparkFadeStuckTime > 1500) {
+        report('info', 'Watchdog unsticking fadeOpacity on ' + sceneName + ' (was ' + scene._fadeOpacity + ')', '', 0);
+        scene._fadeOpacity = 0;
+        scene._fadeDuration = 0;
+        scene._fadeSign = 0;
+        try {
+          if (typeof scene.updateColorFilter === 'function') {
+            scene.updateColorFilter();
+          }
+        } catch (e) {}
+      }
+    } else if (scene && scene._fadeOpacity === 0) {
+      scene._sparkFadeStuckTime = null;
+    }
+
+    // Diagnostic line: If remaining on Scene_Boot or Scene_Title with fadeOpacity === 255 for > 4s after launch
+    var elapsedSinceLaunch = now - sparkBootstrapLaunchTime;
+    var fadeVal = (scene && typeof scene._fadeOpacity !== 'undefined') ? scene._fadeOpacity : 'n/a';
+    if (elapsedSinceLaunch > 4000 && !window.__sparkReportedSceneDiagnostic) {
+      if ((sceneName === 'Scene_Boot' || sceneName === 'Scene_Title') && fadeVal === 255) {
+        window.__sparkReportedSceneDiagnostic = true;
+        report('info', 'Scene: ' + sceneName + ', ready=' + isSceneReady + ', fade=' + fadeVal, '', 0);
+      }
+    }
     if (!isStalled) {
       stallStartTime = null;
       return;
@@ -4385,8 +4580,8 @@
     }
   }
 
-  // Poll continuously every 1.5 seconds
-  setInterval(checkReadinessWatchdog, 1500);
+  // Poll continuously for readiness and stuck scenes
+  setInterval(checkReadinessWatchdog, 500);
 
   // MARK: - Milestone Listeners (DOM, main.js, Scenes)
 

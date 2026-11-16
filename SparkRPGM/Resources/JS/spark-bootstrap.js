@@ -150,6 +150,35 @@
 
   window.__sparkReportStage = reportStage;
 
+  // MARK: - JavaScriptCore Error.stack Name + Message Fix
+  try {
+    var origStackDesc = Object.getOwnPropertyDescriptor(Error.prototype, 'stack');
+    if (origStackDesc && origStackDesc.get) {
+      Object.defineProperty(Error.prototype, 'stack', {
+        configurable: true,
+        enumerable: false,
+        get: function () {
+          window._sparkLastError = this;
+          var rawStack = '';
+          try { rawStack = origStackDesc.get.call(this) || ''; } catch (e) {}
+          var name = (this && this.name) || 'Error';
+          var message = (this && this.message) || '';
+          var title = name + (message ? ': ' + message : '');
+          if (rawStack) {
+            if (rawStack.indexOf(title) === 0) return rawStack;
+            return title + '\n' + rawStack;
+          }
+          return title;
+        },
+        set: function (val) {
+          if (origStackDesc.set) {
+            try { origStackDesc.set.call(this, val); } catch (e) {}
+          }
+        }
+      });
+    }
+  } catch (e) {}
+
   // MARK: - Error Formatting Helper (JavaScriptCore stack fix)
 
   function formatError(err) {
@@ -163,6 +192,14 @@
     if (typeof err === 'string') {
       var str = err.trim();
       if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(str)) {
+        return str;
+      }
+      if (window._sparkLastError) {
+        var lastErr = window._sparkLastError;
+        var lastTitle = (lastErr.name || 'Error') + (lastErr.message ? ': ' + lastErr.message : '');
+        if (str.indexOf(lastTitle) !== 0) {
+          return lastTitle + '\n' + str;
+        }
         return str;
       }
       return 'Error: ' + str;
@@ -326,7 +363,10 @@
           var res = origSetup.apply(this, arguments);
           try {
             ensureHUDDefaults();
-            if (window.Scene_Boot) {
+            if (window.Scene_Base && typeof patchSceneBase === 'function') {
+      patchSceneBase(window.Scene_Base);
+    }
+    if (window.Scene_Boot) {
               if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
               if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
             }
@@ -1286,6 +1326,131 @@
     });
   } catch (e) {}
 
+  try {
+    if (typeof window.Stage !== 'undefined' && window.Stage && window.Stage.prototype) {
+      if (typeof window.Stage.prototype.initialize !== 'function') {
+        window.Stage.prototype.initialize = function () {
+          try {
+            if (window.PIXI && typeof window.PIXI.Container === 'function') {
+              window.PIXI.Container.call(this);
+            }
+          } catch (e) {}
+        };
+      }
+    }
+  } catch (e) {}
+
+  function patchSceneBase(sb) {
+    if (!sb || !sb.prototype) return;
+    try {
+      var currentInit = sb.prototype.initialize;
+      function wrapInit(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          // If invoked without proper this context or without new:
+          if (!this || !(this instanceof sb) || this === window) {
+            report('info', 'Scene_Base.initialize called with invalid this context, ignored', '', 0);
+            return;
+          }
+
+          // Ensure Stage and PIXI are initialized safely
+          try {
+            if (window.Stage && window.Stage.prototype && typeof window.Stage.prototype.initialize === 'function') {
+              window.Stage.prototype.initialize.call(this);
+            } else if (window.PIXI && typeof window.PIXI.Container === 'function') {
+              window.PIXI.Container.call(this);
+            }
+          } catch (e) {}
+
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.initialize recovered: ' + formatError(e), '', 0);
+            this._started = false;
+            this._active = false;
+            this._fadeSign = 0;
+            this._fadeDuration = 0;
+            this._fadeWhite = 0;
+            this._fadeOpacity = 0;
+            try {
+              if (typeof this.createColorFilter === 'function') {
+                this.createColorFilter();
+              }
+            } catch (e2) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+
+      if (typeof currentInit === 'function' && !currentInit.__sparkWrapped) {
+        currentInit = wrapInit(currentInit);
+      }
+
+      try {
+        Object.defineProperty(sb.prototype, 'initialize', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentInit;
+          },
+          set: function (newFn) {
+            currentInit = wrapInit(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentInit) sb.prototype.initialize = currentInit;
+      }
+
+      var currentCCF = sb.prototype.createColorFilter;
+      function wrapCCF(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Base.createColorFilter recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCCF === 'function' && !currentCCF.__sparkWrapped) {
+        currentCCF = wrapCCF(currentCCF);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'createColorFilter', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCCF;
+          },
+          set: function (newFn) {
+            currentCCF = wrapCCF(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCCF) sb.prototype.createColorFilter = currentCCF;
+      }
+    } catch (e) {}
+  }
+
+  var rawSceneBase = window.Scene_Base;
+  if (rawSceneBase) patchSceneBase(rawSceneBase);
+  try {
+    Object.defineProperty(window, 'Scene_Base', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawSceneBase;
+      },
+      set: function (val) {
+        rawSceneBase = val;
+        patchSceneBase(val);
+      }
+    });
+  } catch (e) {}
+
   var rawSceneBoot = window.Scene_Boot;
   if (rawSceneBoot) patchSceneBoot(rawSceneBoot);
   try {
@@ -1532,6 +1697,7 @@
       this._sparkResolvedUrl = resolvedUrl;
 
       var isAsync = async === undefined ? true : !!async;
+      this._sparkAsync = isAsync;
       return originalOpen.call(this, method, resolvedUrl, isAsync, user, password);
     };
 
@@ -1589,8 +1755,9 @@
         });
       }, false);
 
+      var sendResult;
       try {
-        return originalSend.apply(this, arguments);
+        sendResult = originalSend.apply(this, arguments);
       } catch (err) {
         if (targetUrl) delete pendingXHRs[targetUrl];
         if (self._sparkIsHUD) {
@@ -1605,7 +1772,93 @@
         report('resource', 'Failed to load: ' + targetUrl + ' (' + (err.message || err) + ')', targetUrl, 0);
         throw err;
       }
+
+      // In synchronous mode, the request is completed immediately after send() returns.
+      if (self._sparkAsync === false) {
+        if (targetUrl) delete pendingXHRs[targetUrl];
+        try {
+          var syncStatus = 0;
+          try {
+            if (originalStatusDesc && originalStatusDesc.get) {
+              syncStatus = originalStatusDesc.get.call(self);
+            }
+          } catch (e) {}
+          var syncTxt = '';
+          try {
+            if (originalResponseTextDesc && originalResponseTextDesc.get) {
+              syncTxt = originalResponseTextDesc.get.call(self) || '';
+            }
+          } catch (e) {}
+          if ((syncStatus === 0 || syncStatus === 200) && syncTxt && syncTxt.length > 0) {
+            self._sparkCustomStatus = 200;
+            self._sparkCustomStatusText = 'OK';
+          }
+        } catch (e) {}
+      }
+
+      return sendResult;
     };
+
+    var originalResponseTypeDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseType');
+    try {
+      Object.defineProperty(XMLHttpRequest.prototype, 'responseType', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          if (typeof this._sparkCustomResponseType !== 'undefined') {
+            return this._sparkCustomResponseType;
+          }
+          if (this._sparkAsync === false) {
+            return '';
+          }
+          try {
+            if (originalResponseTypeDesc && originalResponseTypeDesc.get) {
+              return originalResponseTypeDesc.get.call(this);
+            }
+          } catch (e) {}
+          return '';
+        },
+        set: function (val) {
+          this._sparkCustomResponseType = val;
+          if (this._sparkAsync !== false) {
+            try {
+              if (originalResponseTypeDesc && originalResponseTypeDesc.set) {
+                originalResponseTypeDesc.set.call(this, val);
+              }
+            } catch (e) {}
+          }
+        }
+      });
+    } catch (e) {}
+
+    var originalTimeoutDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'timeout');
+    try {
+      Object.defineProperty(XMLHttpRequest.prototype, 'timeout', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          if (typeof this._sparkCustomTimeout !== 'undefined') {
+            return this._sparkCustomTimeout;
+          }
+          try {
+            if (originalTimeoutDesc && originalTimeoutDesc.get) {
+              return originalTimeoutDesc.get.call(this);
+            }
+          } catch (e) {}
+          return 0;
+        },
+        set: function (val) {
+          this._sparkCustomTimeout = val;
+          if (this._sparkAsync !== false) {
+            try {
+              if (originalTimeoutDesc && originalTimeoutDesc.set) {
+                originalTimeoutDesc.set.call(this, val);
+              }
+            } catch (e) {}
+          }
+        }
+      });
+    } catch (e) {}
 
     var originalResponseTextDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'responseText');
     var originalResponseDesc = Object.getOwnPropertyDescriptor(XMLHttpRequest.prototype, 'response');
@@ -1676,19 +1929,22 @@
         if (rawStatus === 0 && this.readyState === 4 && !this._sparkFailed) {
           var hasContent = false;
           try {
-            var rType = this.responseType;
+            var rType = '';
+            try {
+              rType = (typeof this._sparkCustomResponseType !== 'undefined') ? this._sparkCustomResponseType : (this._sparkAsync === false ? '' : (this.responseType || ''));
+            } catch (e) {
+              rType = '';
+            }
             if (rType === '' || rType === 'text') {
               hasContent = typeof this.responseText === 'string' && this.responseText.length > 0;
+            } else if (rType === 'json') {
+              hasContent = this.response !== null && this.response !== undefined;
             } else if (rType === 'arraybuffer') {
               hasContent = this.response && this.response.byteLength > 0;
             } else if (rType === 'blob') {
               hasContent = this.response && this.response.size > 0;
-            } else if (rType === 'json') {
-              hasContent = this.response !== null && this.response !== undefined;
-            } else if (rType === 'document') {
-              hasContent = this.responseXML !== null && this.responseXML !== undefined;
             } else {
-              hasContent = this.response !== null && this.response !== undefined;
+              hasContent = typeof this.responseText === 'string' && this.responseText.length > 0;
             }
           } catch (err) {}
           if (hasContent) return 200;
@@ -2709,6 +2965,9 @@
     if (window.ColorManager && typeof patchColorManager === 'function') {
       patchColorManager(window.ColorManager);
     }
+    if (window.Scene_Base && typeof patchSceneBase === 'function') {
+      patchSceneBase(window.Scene_Base);
+    }
     if (window.Scene_Boot) {
       if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
       if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
@@ -2971,7 +3230,10 @@
               if (typeof patchSceneBoot === 'function') patchSceneBoot(sceneClass);
               if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(sceneClass);
             }
-            if (window.Scene_Boot) {
+            if (window.Scene_Base && typeof patchSceneBase === 'function') {
+      patchSceneBase(window.Scene_Base);
+    }
+    if (window.Scene_Boot) {
               if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
               if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
             }
@@ -2984,6 +3246,95 @@
       }
 
       hookSceneManagerErrors(sm);
+
+      // 4. SceneManager.goto
+      function wrapGoto(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function (sceneClass) {
+          if (!sceneClass || typeof sceneClass !== 'function') {
+            report('info', 'SceneManager.goto ignored invalid sceneClass: ' + sceneClass, '', 0);
+            return;
+          }
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'SceneManager.goto recovered: ' + formatError(e), '', 0);
+            try {
+              if (typeof sceneClass === 'function' && !this._nextScene) {
+                this._nextScene = Object.create(sceneClass.prototype);
+                try { sceneClass.call(this._nextScene); } catch (e2) {}
+              }
+            } catch (e3) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+
+      var currentGoto = sm.goto;
+      if (typeof currentGoto === 'function' && !currentGoto.__sparkWrapped) {
+        currentGoto = wrapGoto(currentGoto);
+      }
+      try {
+        Object.defineProperty(sm, 'goto', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentGoto;
+          },
+          set: function (newFn) {
+            currentGoto = wrapGoto(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentGoto) sm.goto = currentGoto;
+      }
+
+      // 5. SceneManager.changeScene
+      function wrapChangeScene(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            if (this._nextScene && typeof this._nextScene === 'function') {
+              try {
+                this._nextScene = new this._nextScene();
+              } catch (e) {
+                report('info', 'SceneManager.changeScene instantiated nextScene constructor: ' + formatError(e), '', 0);
+                this._nextScene = Object.create(this._nextScene.prototype);
+                try { this._nextScene.initialize(); } catch (e2) {}
+              }
+            }
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'SceneManager.changeScene recovered: ' + formatError(e), '', 0);
+            if (this._nextScene) {
+              this._scene = this._nextScene;
+              this._nextScene = null;
+            }
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+
+      var currentChange = sm.changeScene;
+      if (typeof currentChange === 'function' && !currentChange.__sparkWrapped) {
+        currentChange = wrapChangeScene(currentChange);
+      }
+      try {
+        Object.defineProperty(sm, 'changeScene', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentChange;
+          },
+          set: function (newFn) {
+            currentChange = wrapChangeScene(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentChange) sm.changeScene = currentChange;
+      }
     } catch (e) {}
   }
 
@@ -3223,6 +3574,9 @@
     }
     if (window.ImageManager && typeof patchImageManager === 'function') patchImageManager(window.ImageManager);
     if (window.ColorManager && typeof patchColorManager === 'function') patchColorManager(window.ColorManager);
+    if (window.Scene_Base && typeof patchSceneBase === 'function') {
+      patchSceneBase(window.Scene_Base);
+    }
     if (window.Scene_Boot) {
       if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
       if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);

@@ -99,6 +99,7 @@
 
   window.__sparkReportError = report;
   window.__sparkBrowserMode = true;
+  window._sparkLastError = null;
 
   // MARK: - Gamepad Polyfill for iOS WKWebView file://
 
@@ -153,6 +154,9 @@
 
   function formatError(err) {
     if (!err) return 'Error: Unknown error';
+    if (err && (err instanceof Error || (typeof err === 'object' && (err.name || err.message)))) {
+      window._sparkLastError = err;
+    }
     if (Array.isArray(err) && err[0] === 'LoadError') {
       return 'LoadError: Failed to load ' + (err[1] || 'resource');
     }
@@ -650,6 +654,49 @@
 
   function hookSceneBootPrototype(sb) {
     if (!sb || !sb.prototype) return;
+
+    try {
+      var currentLoadGameFonts = sb.prototype.loadGameFonts;
+      function wrapLoadGameFonts(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          try {
+            if (!window.$dataSystem || !window.$dataSystem.advanced) {
+              if (window.FontManager && typeof window.FontManager.load === 'function') {
+                try {
+                  window.FontManager.load('rmmz-mainfont', 'mplus-1m-regular.woff');
+                  window.FontManager.load('rmmz-numberfont', 'mplus-1m-regular.woff');
+                } catch (e) {}
+              }
+              return;
+            }
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.loadGameFonts recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentLoadGameFonts === 'function' && !currentLoadGameFonts.__sparkWrapped) {
+        currentLoadGameFonts = wrapLoadGameFonts(currentLoadGameFonts);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'loadGameFonts', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentLoadGameFonts;
+          },
+          set: function (newFn) {
+            currentLoadGameFonts = wrapLoadGameFonts(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentLoadGameFonts) sb.prototype.loadGameFonts = currentLoadGameFonts;
+      }
+    } catch (e) {}
+
     try {
       var currentLoadSysImages = sb.prototype.loadSystemImages;
       function wrapLoadSysImages(fn) {
@@ -689,23 +736,9 @@
         if (!fn) return fn;
         var wrapped = function () {
           try {
-            if (window.StorageManager && typeof window.StorageManager.updateForageKeys === 'function') {
-              try {
-                window.StorageManager.updateForageKeys();
-              } catch (smErr) {
-                report('info', 'StorageManager.updateForageKeys in Scene_Boot.create recovered: ' + formatError(smErr), '', 0);
-              }
-            }
-          } catch (e) {}
-          try {
             return fn.apply(this, arguments);
           } catch (e) {
             report('info', 'Scene_Boot.create recovered: ' + formatError(e), '', 0);
-            try {
-              if (typeof this.loadSystemImages === 'function') {
-                this.loadSystemImages();
-              }
-            } catch (errImg) {}
           }
         };
         wrapped.__sparkWrapped = true;
@@ -736,6 +769,28 @@
     try {
       hookSceneBootPrototype(sb);
 
+      if (typeof sb.prototype.loadGameFonts === 'function' && !sb.prototype.loadGameFonts.__sparkWrapped) {
+        var origLoadGameFonts = sb.prototype.loadGameFonts;
+        var wrappedLoadGameFonts = function () {
+          try {
+            if (!window.$dataSystem || !window.$dataSystem.advanced) {
+              if (window.FontManager && typeof window.FontManager.load === 'function') {
+                try {
+                  window.FontManager.load('rmmz-mainfont', 'mplus-1m-regular.woff');
+                  window.FontManager.load('rmmz-numberfont', 'mplus-1m-regular.woff');
+                } catch (e) {}
+              }
+              return;
+            }
+            return origLoadGameFonts.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.loadGameFonts recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedLoadGameFonts.__sparkWrapped = true;
+        sb.prototype.loadGameFonts = wrappedLoadGameFonts;
+      }
+
       if (typeof sb.prototype.loadSystemImages === 'function' && !sb.prototype.loadSystemImages.__sparkWrapped) {
         var origLoadSysImages = sb.prototype.loadSystemImages;
         var wrappedLoadSysImages = function () {
@@ -753,23 +808,9 @@
         var origCreate = sb.prototype.create;
         var wrappedCreate = function () {
           try {
-            if (window.StorageManager && typeof window.StorageManager.updateForageKeys === 'function') {
-              try {
-                window.StorageManager.updateForageKeys();
-              } catch (smErr) {
-                report('info', 'StorageManager.updateForageKeys in Scene_Boot.create recovered: ' + formatError(smErr), '', 0);
-              }
-            }
-          } catch (e) {}
-          try {
             return origCreate.apply(this, arguments);
           } catch (e) {
             report('info', 'Scene_Boot.create recovered: ' + formatError(e), '', 0);
-            try {
-              if (typeof this.loadSystemImages === 'function') {
-                this.loadSystemImages();
-              }
-            } catch (errImg) {}
           }
         };
         wrappedCreate.__sparkWrapped = true;
@@ -781,6 +822,11 @@
         var wrappedOnDbLoaded = function () {
           this._sparkOnDatabaseLoadedDone = true;
           this._databaseLoaded = true;
+          try {
+            if (window.$dataSystem && window.$dataSystem.advanced && typeof this.loadGameFonts === 'function') {
+              this.loadGameFonts();
+            }
+          } catch (e) {}
           return origOnDbLoaded.apply(this, arguments);
         };
         wrappedOnDbLoaded.__sparkWrapped = true;
@@ -1012,6 +1058,9 @@
       }
 
       var errorObj = event && event.error;
+      if (errorObj && (errorObj instanceof Error || (typeof errorObj === 'object' && (errorObj.name || errorObj.message)))) {
+        window._sparkLastError = errorObj;
+      }
       var message = errorObj ? formatError(errorObj) : ((event && event.message) ? event.message : 'Unknown script error');
       if (!errorObj && message && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)) {
         message = 'Error: ' + message;
@@ -1030,6 +1079,9 @@
       function wrapWinOnError(fn) {
         var wrapper = function (message, source, lineno, colno, error) {
           try {
+            if (error && (error instanceof Error || (typeof error === 'object' && (error.name || error.message)))) {
+              window._sparkLastError = error;
+            }
             var fullMsg = '';
             if (error) {
               fullMsg = formatError(error);
@@ -2193,13 +2245,29 @@
 
   function formatGraphicsError(name, message, error) {
     if (error && (error instanceof Error || (typeof error === 'object' && error !== null && (error.name || error.message || error.stack)))) {
+      window._sparkLastError = error;
       return formatError(error);
     }
     var nameStr = (name ? String(name).trim() : '');
     var msgStr = (message ? String(message).trim() : '');
 
     if (typeof message === 'object' && message !== null) {
+      window._sparkLastError = message;
       return formatError(message);
+    }
+
+    var isRawStack = (msgStr.indexOf('@file:///') !== -1 ||
+                      msgStr.indexOf('file:///') === 0 ||
+                      msgStr.indexOf('@') === 0 ||
+                      (msgStr.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(msgStr)));
+
+    if (isRawStack && window._sparkLastError) {
+      var lastErr = window._sparkLastError;
+      var lastTitle = (lastErr.name || 'Error') + (lastErr.message ? ': ' + lastErr.message : '');
+      if (msgStr.indexOf(lastTitle) !== 0) {
+        return lastTitle + '\n' + msgStr;
+      }
+      return msgStr;
     }
 
     if (nameStr && msgStr) {
@@ -2226,7 +2294,15 @@
           report('graphics.error', formatted, '', 0);
           if (typeof fn === 'function') {
             try {
-              return fn.apply(this, arguments);
+              var callMsg = message;
+              if (window._sparkLastError && typeof message === 'string' && (message.indexOf('@file:///') !== -1 || message.indexOf('file:///') === 0 || message.indexOf('@') === 0 || (message.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)))) {
+                var lErr = window._sparkLastError;
+                var lTitle = (lErr.name || 'Error') + (lErr.message ? ': ' + lErr.message : '');
+                if (message.indexOf(lTitle) !== 0) {
+                  callMsg = lTitle + '\n' + message;
+                }
+              }
+              return fn.call(this, name, callMsg, error);
             } catch (e) {}
           }
         };
@@ -2273,6 +2349,9 @@
       function wrapOnError(fn) {
         var wrapper = function (e) {
           var errorObj = (e && e.error) ? e.error : e;
+          if (errorObj && (errorObj instanceof Error || (typeof errorObj === 'object' && (errorObj.name || errorObj.message)))) {
+            window._sparkLastError = errorObj;
+          }
           var formatted = formatError(errorObj);
           var file = (e && (e.filename || e.fileName)) || '';
           var line = (e && (e.lineno || e.lineNumber)) || 0;
@@ -2312,6 +2391,9 @@
       // 2. SceneManager.catchException
       function wrapCatchException(fn) {
         var wrapper = function (e) {
+          if (e && (e instanceof Error || (typeof e === 'object' && (e.name || e.message)))) {
+            window._sparkLastError = e;
+          }
           var formatted = formatError(e);
           report('engine.error', formatted, '', 0);
           if (typeof fn === 'function') {
@@ -2346,6 +2428,9 @@
       // 3. SceneManager.catchNormalError
       function wrapCatchNormal(fn) {
         var wrapper = function (e) {
+          if (e && (e instanceof Error || (typeof e === 'object' && (e.name || e.message)))) {
+            window._sparkLastError = e;
+          }
           var formatted = formatError(e);
           report('engine.error', formatted, '', 0);
           if (typeof fn === 'function') {

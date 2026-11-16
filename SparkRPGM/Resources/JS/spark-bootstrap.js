@@ -4433,6 +4433,11 @@
         report('info', 'Scene: ' + sceneName + ', ready=' + isSceneReady + ', fade=' + fadeVal, '', 0);
       }
     }
+
+    var loadingCount = (gfx && typeof gfx._loadingCount === 'number') ? gfx._loadingCount : 0;
+    var videoLoading = !!((window.Video && window.Video._loading) || (gfx && gfx._videoLoading));
+    var isStalled = (loadingCount > 0) || (scene && !isSceneReady) || videoLoading;
+
     if (!isStalled) {
       stallStartTime = null;
       return;

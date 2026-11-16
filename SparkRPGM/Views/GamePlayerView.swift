@@ -372,7 +372,10 @@ struct GamePlayerView: View {
                 // Action Buttons Bar: Copy Error, Dismiss, Back to Library
                 HStack(spacing: 10) {
                     Button {
-                        UIPasteboard.general.string = fullErrorText
+                        let textToCopy = fullErrorText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !textToCopy.isEmpty else { return }
+                        UIPasteboard.general.string = textToCopy
+                        UIPasteboard.general.setValue(textToCopy, forPasteboardType: "public.plain-text")
                         withAnimation(.easeInOut(duration: 0.15)) {
                             hasCopiedError = true
                         }

@@ -648,9 +648,134 @@
     } catch (e) {}
   }
 
+  function hookSceneBootPrototype(sb) {
+    if (!sb || !sb.prototype) return;
+    try {
+      var currentLoadSysImages = sb.prototype.loadSystemImages;
+      function wrapLoadSysImages(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.loadSystemImages recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentLoadSysImages === 'function' && !currentLoadSysImages.__sparkWrapped) {
+        currentLoadSysImages = wrapLoadSysImages(currentLoadSysImages);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'loadSystemImages', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentLoadSysImages;
+          },
+          set: function (newFn) {
+            currentLoadSysImages = wrapLoadSysImages(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentLoadSysImages) sb.prototype.loadSystemImages = currentLoadSysImages;
+      }
+    } catch (e) {}
+
+    try {
+      var currentCreate = sb.prototype.create;
+      function wrapCreate(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          try {
+            if (window.StorageManager && typeof window.StorageManager.updateForageKeys === 'function') {
+              try {
+                window.StorageManager.updateForageKeys();
+              } catch (smErr) {
+                report('info', 'StorageManager.updateForageKeys in Scene_Boot.create recovered: ' + formatError(smErr), '', 0);
+              }
+            }
+          } catch (e) {}
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.create recovered: ' + formatError(e), '', 0);
+            try {
+              if (typeof this.loadSystemImages === 'function') {
+                this.loadSystemImages();
+              }
+            } catch (errImg) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCreate === 'function' && !currentCreate.__sparkWrapped) {
+        currentCreate = wrapCreate(currentCreate);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'create', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCreate;
+          },
+          set: function (newFn) {
+            currentCreate = wrapCreate(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCreate) sb.prototype.create = currentCreate;
+      }
+    } catch (e) {}
+  }
+
   function patchSceneBoot(sb) {
     if (!sb || !sb.prototype) return;
     try {
+      hookSceneBootPrototype(sb);
+
+      if (typeof sb.prototype.loadSystemImages === 'function' && !sb.prototype.loadSystemImages.__sparkWrapped) {
+        var origLoadSysImages = sb.prototype.loadSystemImages;
+        var wrappedLoadSysImages = function () {
+          try {
+            return origLoadSysImages.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.loadSystemImages recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedLoadSysImages.__sparkWrapped = true;
+        sb.prototype.loadSystemImages = wrappedLoadSysImages;
+      }
+
+      if (typeof sb.prototype.create === 'function' && !sb.prototype.create.__sparkWrapped) {
+        var origCreate = sb.prototype.create;
+        var wrappedCreate = function () {
+          try {
+            if (window.StorageManager && typeof window.StorageManager.updateForageKeys === 'function') {
+              try {
+                window.StorageManager.updateForageKeys();
+              } catch (smErr) {
+                report('info', 'StorageManager.updateForageKeys in Scene_Boot.create recovered: ' + formatError(smErr), '', 0);
+              }
+            }
+          } catch (e) {}
+          try {
+            return origCreate.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.create recovered: ' + formatError(e), '', 0);
+            try {
+              if (typeof this.loadSystemImages === 'function') {
+                this.loadSystemImages();
+              }
+            } catch (errImg) {}
+          }
+        };
+        wrappedCreate.__sparkWrapped = true;
+        sb.prototype.create = wrappedCreate;
+      }
+
       if (typeof sb.prototype.onDatabaseLoaded === 'function' && !sb.prototype.onDatabaseLoaded.__sparkWrapped) {
         var origOnDbLoaded = sb.prototype.onDatabaseLoaded;
         var wrappedOnDbLoaded = function () {
@@ -663,6 +788,143 @@
       }
     } catch (e) {}
   }
+
+  function patchImageManager(im) {
+    if (!im) return;
+    try {
+      var currentLoadSystem = im.loadSystem;
+      function wrapLoadSystem(fn) {
+        if (!fn) return fn;
+        var wrapped = function (filename) {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'ImageManager.loadSystem(' + filename + ') recovered: ' + formatError(e), '', 0);
+            return (this._emptyBitmap || null);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentLoadSystem === 'function' && !currentLoadSystem.__sparkWrapped) {
+        currentLoadSystem = wrapLoadSystem(currentLoadSystem);
+      }
+      try {
+        Object.defineProperty(im, 'loadSystem', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentLoadSystem;
+          },
+          set: function (newFn) {
+            currentLoadSystem = wrapLoadSystem(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentLoadSystem) im.loadSystem = currentLoadSystem;
+      }
+
+      var currentLoadBitmap = im.loadBitmap;
+      function wrapLoadBitmap(fn) {
+        if (!fn) return fn;
+        var wrapped = function (folder, filename) {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'ImageManager.loadBitmap(' + folder + ', ' + filename + ') recovered: ' + formatError(e), '', 0);
+            return (this._emptyBitmap || null);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentLoadBitmap === 'function' && !currentLoadBitmap.__sparkWrapped) {
+        currentLoadBitmap = wrapLoadBitmap(currentLoadBitmap);
+      }
+      try {
+        Object.defineProperty(im, 'loadBitmap', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentLoadBitmap;
+          },
+          set: function (newFn) {
+            currentLoadBitmap = wrapLoadBitmap(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentLoadBitmap) im.loadBitmap = currentLoadBitmap;
+      }
+    } catch (e) {}
+  }
+
+  var rawImageManager = window.ImageManager;
+  if (rawImageManager) patchImageManager(rawImageManager);
+  try {
+    Object.defineProperty(window, 'ImageManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawImageManager;
+      },
+      set: function (val) {
+        rawImageManager = val;
+        patchImageManager(val);
+      }
+    });
+  } catch (e) {}
+
+  function patchColorManager(cm) {
+    if (!cm) return;
+    try {
+      var currentLoadWindowskin = cm.loadWindowskin;
+      function wrapLoadWindowskin(fn) {
+        if (!fn) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'ColorManager.loadWindowskin recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentLoadWindowskin === 'function' && !currentLoadWindowskin.__sparkWrapped) {
+        currentLoadWindowskin = wrapLoadWindowskin(currentLoadWindowskin);
+      }
+      try {
+        Object.defineProperty(cm, 'loadWindowskin', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentLoadWindowskin;
+          },
+          set: function (newFn) {
+            currentLoadWindowskin = wrapLoadWindowskin(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentLoadWindowskin) cm.loadWindowskin = currentLoadWindowskin;
+      }
+    } catch (e) {}
+  }
+
+  var rawColorManager = window.ColorManager;
+  if (rawColorManager) patchColorManager(rawColorManager);
+  try {
+    Object.defineProperty(window, 'ColorManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawColorManager;
+      },
+      set: function (val) {
+        rawColorManager = val;
+        patchColorManager(val);
+      }
+    });
+  } catch (e) {}
 
   var rawGameBattlerBase = window.Game_BattlerBase;
   if (rawGameBattlerBase) patchGameBattlerBase(rawGameBattlerBase);
@@ -762,27 +1024,60 @@
   }, true);
 
   var origWindowOnError = window.onerror;
-  window.onerror = function (message, source, lineno, colno, error) {
+  function hookWindowOnError() {
     try {
-      var fullMsg = '';
-      if (error) {
-        fullMsg = formatError(error);
-      } else {
-        var strMsg = String(message || 'Unknown script error');
-        var stackPart = (source ? '\n@' + source + (lineno ? ':' + lineno : '') + (colno ? ':' + colno : '') : '');
-        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(strMsg)) {
-          fullMsg = strMsg + stackPart;
-        } else {
-          fullMsg = 'Error: ' + strMsg + stackPart;
-        }
+      var currentWindowOnError = window.onerror;
+      function wrapWinOnError(fn) {
+        var wrapper = function (message, source, lineno, colno, error) {
+          try {
+            var fullMsg = '';
+            if (error) {
+              fullMsg = formatError(error);
+            } else {
+              var strMsg = String(message || 'Unknown script error');
+              var stackPart = (source ? '\n@' + source + (lineno ? ':' + lineno : '') + (colno ? ':' + colno : '') : '');
+              if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(strMsg)) {
+                fullMsg = strMsg + stackPart;
+              } else {
+                fullMsg = 'Error: ' + strMsg + stackPart;
+              }
+            }
+            report('script', fullMsg, source || '', lineno || 0, { column: colno || 0 });
+          } catch (e) {}
+          if (typeof fn === 'function') {
+            try {
+              return fn.apply(window, arguments);
+            } catch (err) {}
+          }
+          return false;
+        };
+        wrapper.__sparkWrapped = true;
+        return wrapper;
       }
-      report('script', fullMsg, source || '', lineno || 0, { column: colno || 0 });
+
+      if (typeof currentWindowOnError === 'function' && !currentWindowOnError.__sparkWrapped) {
+        currentWindowOnError = wrapWinOnError(currentWindowOnError);
+      } else if (!currentWindowOnError) {
+        currentWindowOnError = wrapWinOnError(origWindowOnError);
+      }
+
+      try {
+        Object.defineProperty(window, 'onerror', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentWindowOnError;
+          },
+          set: function (newFn) {
+            currentWindowOnError = wrapWinOnError(newFn);
+          }
+        });
+      } catch (err) {
+        window.onerror = currentWindowOnError;
+      }
     } catch (e) {}
-    if (typeof origWindowOnError === 'function') {
-      return origWindowOnError.apply(window, arguments);
-    }
-    return false;
-  };
+  }
+  hookWindowOnError();
 
   window.addEventListener('unhandledrejection', function (event) {
     try {
@@ -1339,59 +1634,144 @@
     function patchStorageManager(sm) {
       if (!sm || (typeof sm !== 'object' && typeof sm !== 'function')) return;
       try {
-        sm._forageKeys = sm._forageKeys || [];
+        if (!Array.isArray(sm._forageKeys)) {
+          sm._forageKeys = sm._forageKeys || [];
+        }
+        if (typeof sm._forageKeysUpdated !== 'boolean') {
+          sm._forageKeysUpdated = true;
+        }
+
         sm.isLocalMode = function () { return false; };
         sm.fileDirectoryPath = function () { return 'save/'; };
         sm.localFileDirectoryPath = function () { return 'save/'; };
-        sm.filePath = function (saveName) {
-          var k = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
-          return this.fileDirectoryPath() + k;
-        };
-        if (!sm.forageKey) {
-          sm.forageKey = function (saveName) { return 'rmmzsave.' + saveName; };
-        }
-        if (!sm.isForageKey) {
-          sm.isForageKey = function (key) { return String(key || '').indexOf('rmmzsave.') === 0; };
-        }
-        sm.forageKeys = function () {
-          return this._forageKeys || [];
-        };
-        sm._forageKeysUpdated = true;
-        sm.forageKeysUpdated = function () {
-          var dm = window.DataManager;
-          if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
-            return true;
-          }
-          return typeof this._forageKeysUpdated === 'boolean' ? this._forageKeysUpdated : true;
-        };
-        sm.updateForageKeys = function () {
-          this._forageKeys = [];
-          this._forageKeysUpdated = false;
-          var self = this;
-          return sparkLocalForage.iterate(function (value, key) {
-            if (!self.isForageKey || self.isForageKey(key)) {
-              self._forageKeys.push(key);
+        sm.forageKeyPrefix = function () { return 'rmmzsave.'; };
+
+        sm.forageKey = function (saveName) {
+          var prefix = 'rmmzsave.';
+          try {
+            if (this && typeof this.forageKeyPrefix === 'function') {
+              prefix = this.forageKeyPrefix();
+            } else if (sm && typeof sm.forageKeyPrefix === 'function') {
+              prefix = sm.forageKeyPrefix();
             }
-          }).then(function () {
-            self._forageKeysUpdated = true;
-            return self._forageKeys;
-          }).catch(function () {
-            self._forageKeysUpdated = true;
-            return self._forageKeys;
-          });
+          } catch (e) {}
+          return prefix + (saveName || '');
         };
+
+        sm.isForageKey = function (key) {
+          var prefix = 'rmmzsave.';
+          try {
+            if (this && typeof this.forageKeyPrefix === 'function') {
+              prefix = this.forageKeyPrefix();
+            } else if (sm && typeof sm.forageKeyPrefix === 'function') {
+              prefix = sm.forageKeyPrefix();
+            }
+          } catch (e) {}
+          return String(key || '').indexOf(prefix) === 0;
+        };
+
+        sm.filePath = function (saveName) {
+          var k = '';
+          try {
+            if (this && typeof this.forageKey === 'function') {
+              k = this.forageKey(saveName);
+            } else {
+              k = 'rmmzsave.' + (saveName || '');
+            }
+          } catch (e) {
+            k = 'rmmzsave.' + (saveName || '');
+          }
+          return 'save/' + k;
+        };
+
+        sm.forageKeys = function () {
+          var target = (this && Array.isArray(this._forageKeys)) ? this : sm;
+          return (target && Array.isArray(target._forageKeys)) ? target._forageKeys : [];
+        };
+
+        sm.forageKeysUpdated = function () {
+          try {
+            var dm = window.DataManager;
+            if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
+              return true;
+            }
+          } catch (e) {}
+          try {
+            var target = (this && typeof this._forageKeysUpdated === 'boolean') ? this : sm;
+            if (target && typeof target._forageKeysUpdated === 'boolean') {
+              return target._forageKeysUpdated;
+            }
+          } catch (e) {}
+          return true;
+        };
+
+        sm.updateForageKeys = function () {
+          var self = (this && (typeof this === 'object' || typeof this === 'function')) ? this : (sm || window.StorageManager || {});
+          if (!Array.isArray(self._forageKeys)) {
+            self._forageKeys = (sm && Array.isArray(sm._forageKeys)) ? sm._forageKeys : [];
+          }
+          self._forageKeysUpdated = false;
+
+          try {
+            var lf = window.localforage || (typeof sparkLocalForage !== 'undefined' ? sparkLocalForage : null);
+            if (!lf || typeof lf.iterate !== 'function') {
+              self._forageKeysUpdated = true;
+              return Promise.resolve(self._forageKeys);
+            }
+            return Promise.resolve(lf.iterate(function (value, key) {
+              try {
+                var match = false;
+                if (self && typeof self.isForageKey === 'function') {
+                  match = self.isForageKey(key);
+                } else if (sm && typeof sm.isForageKey === 'function') {
+                  match = sm.isForageKey(key);
+                } else {
+                  match = String(key || '').indexOf('rmmzsave.') === 0;
+                }
+                if (match && self._forageKeys.indexOf(key) === -1) {
+                  self._forageKeys.push(key);
+                }
+              } catch (iterErr) {}
+            })).then(function () {
+              self._forageKeysUpdated = true;
+              return self._forageKeys;
+            }).catch(function () {
+              self._forageKeysUpdated = true;
+              return self._forageKeys;
+            });
+          } catch (syncErr) {
+            self._forageKeysUpdated = true;
+            return Promise.resolve(self._forageKeys || []);
+          }
+        };
+
         sm.forageExists = function (saveName) {
-          var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
+          var key = 'rmmzsave.' + (saveName || '');
+          try {
+            if (this && typeof this.forageKey === 'function') {
+              key = this.forageKey(saveName);
+            }
+          } catch (e) {}
           return sparkLocalForage.getItem(key).then(function (data) {
             return data !== null && data !== undefined;
           });
         };
         sm.removeForage = function (saveName) {
-          var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
+          var key = 'rmmzsave.' + (saveName || '');
+          try {
+            if (this && typeof this.forageKey === 'function') {
+              key = this.forageKey(saveName);
+            }
+          } catch (e) {}
           return sparkLocalForage.removeItem(key);
         };
         sm.saveToForage = function (saveName, zip) {
-          var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
+          var key = 'rmmzsave.' + (saveName || '');
+          try {
+            if (this && typeof this.forageKey === 'function') {
+              key = this.forageKey(saveName);
+            }
+          } catch (e) {}
           var zipString = typeof zip === 'string' ? zip : (zip !== null && zip !== undefined ? JSON.stringify(zip) : '');
           return sparkLocalForage.setItem(key, zipString);
         };
@@ -1399,7 +1779,12 @@
           return this.saveToForage(saveName, zip);
         };
         sm.loadFromForage = function (saveName) {
-          var key = this.forageKey ? this.forageKey(saveName) : ('rmmzsave.' + saveName);
+          var key = 'rmmzsave.' + (saveName || '');
+          try {
+            if (this && typeof this.forageKey === 'function') {
+              key = this.forageKey(saveName);
+            }
+          } catch (e) {}
           return sparkLocalForage.getItem(key).then(function (data) {
             if (data !== null && data !== undefined && data !== '') {
               return data;
@@ -1445,6 +1830,21 @@
       };
     }
     patchStorageManager(window.StorageManager);
+
+    var rawStorageManager = window.StorageManager;
+    try {
+      Object.defineProperty(window, 'StorageManager', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          return rawStorageManager;
+        },
+        set: function (val) {
+          rawStorageManager = val;
+          patchStorageManager(val);
+        }
+      });
+    } catch (e) {}
 
     var smAttempts = 0;
     var smTimer = setInterval(function () {
@@ -1690,11 +2090,11 @@
       if (typeof sm.forageKeysUpdated === 'function' && !sm.forageKeysUpdated.__sparkWrapped) {
         var origFKU = sm.forageKeysUpdated;
         var wrappedFKU = function () {
-          var dm = window.DataManager;
-          if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
-            return true;
-          }
           try {
+            var dm = window.DataManager;
+            if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
+              return true;
+            }
             return origFKU.apply(this, arguments);
           } catch (e) {
             return true;
@@ -1702,6 +2102,32 @@
         };
         wrappedFKU.__sparkWrapped = true;
         sm.forageKeysUpdated = wrappedFKU;
+      }
+      if (typeof sm.updateForageKeys === 'function' && !sm.updateForageKeys.__sparkWrapped) {
+        var origUFK = sm.updateForageKeys;
+        var wrappedUFK = function () {
+          try {
+            var self = (this && (typeof this === 'object' || typeof this === 'function')) ? this : (sm || window.StorageManager || {});
+            if (!self._forageKeys || !Array.isArray(self._forageKeys)) {
+              self._forageKeys = (sm && Array.isArray(sm._forageKeys)) ? sm._forageKeys : [];
+            }
+            var res = origUFK.apply(self, arguments);
+            if (res && typeof res.then === 'function') {
+              return res.catch(function () {
+                return self._forageKeys || [];
+              });
+            }
+            return Promise.resolve(self._forageKeys || []);
+          } catch (e) {
+            if (this) {
+              if (!this._forageKeys) this._forageKeys = [];
+              this._forageKeysUpdated = true;
+            }
+            return Promise.resolve([]);
+          }
+        };
+        wrappedUFK.__sparkWrapped = true;
+        sm.updateForageKeys = wrappedUFK;
       }
     }
 
@@ -1737,11 +2163,25 @@
       patchSceneMap(window.Scene_Map);
     }
     ensureButtonCommonEventsDefaults();
+    if (window.ImageManager && typeof patchImageManager === 'function') {
+      patchImageManager(window.ImageManager);
+    }
+    if (window.ColorManager && typeof patchColorManager === 'function') {
+      patchColorManager(window.ColorManager);
+    }
     if (window.Scene_Boot) {
-      patchSceneBoot(window.Scene_Boot);
+      if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
+      if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+    }
+    if (window.Graphics && typeof hookGraphicsPrintError === 'function') {
+      hookGraphicsPrintError(window.Graphics);
     }
     if (window.SceneManager) {
-      patchSceneManagerInstance(window.SceneManager);
+      if (typeof patchSceneManagerInstance === 'function') patchSceneManagerInstance(window.SceneManager);
+      if (typeof hookSceneManagerErrors === 'function') hookSceneManagerErrors(window.SceneManager);
+    }
+    if (typeof hookWindowOnError === 'function') {
+      hookWindowOnError();
     }
   }
 
@@ -1749,33 +2189,194 @@
     patchDataManagerInstance(window.DataManager);
   }
 
-  // Graphics: intercept printError to report engine errors to Swift with formatted stack
-  function patchGraphicsInstance(gfx) {
+  // MARK: - Graphics.printError & SceneManager.onError Overwrite Locks
+
+  function formatGraphicsError(name, message, error) {
+    if (error && (error instanceof Error || (typeof error === 'object' && error !== null && (error.name || error.message || error.stack)))) {
+      return formatError(error);
+    }
+    var nameStr = (name ? String(name).trim() : '');
+    var msgStr = (message ? String(message).trim() : '');
+
+    if (typeof message === 'object' && message !== null) {
+      return formatError(message);
+    }
+
+    if (nameStr && msgStr) {
+      if (msgStr.indexOf(nameStr) === 0) {
+        return formatError(msgStr);
+      }
+      return formatError(nameStr + ': ' + msgStr);
+    }
+    if (msgStr) {
+      return formatError(msgStr);
+    }
+    if (nameStr) {
+      return formatError(nameStr);
+    }
+    return 'Error: Unknown graphics error';
+  }
+
+  function hookGraphicsPrintError(gfx) {
     if (!gfx || (typeof gfx !== 'object' && typeof gfx !== 'function')) return;
     try {
-      if (gfx.__sparkPatched) return;
-      gfx.__sparkPatched = true;
+      function wrapPrintError(fn) {
+        var wrapper = function (name, message, error) {
+          var formatted = formatGraphicsError(name, message, error);
+          report('graphics.error', formatted, '', 0);
+          if (typeof fn === 'function') {
+            try {
+              return fn.apply(this, arguments);
+            } catch (e) {}
+          }
+        };
+        wrapper.__sparkWrapped = true;
+        return wrapper;
+      }
 
-      var origPrintError = gfx.printError;
-      gfx.printError = function (name, message, error) {
-        var formatted = '';
-        if (error) {
-          formatted = formatError(error);
-        } else if (message) {
-          formatted = formatError(message);
-        } else {
-          formatted = formatError(name || 'Unknown graphics error');
-        }
-        report('graphics.error', formatted, '', 0);
-        if (origPrintError) {
-          return origPrintError.apply(this, arguments);
-        }
-      };
+      var current = gfx.printError;
+      if (typeof current === 'function' && !current.__sparkWrapped) {
+        current = wrapPrintError(current);
+      } else if (!current) {
+        current = wrapPrintError(null);
+      }
+
+      try {
+        Object.defineProperty(gfx, 'printError', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return current;
+          },
+          set: function (newFn) {
+            current = wrapPrintError(newFn);
+          }
+        });
+      } catch (err) {
+        gfx.printError = current;
+      }
     } catch (e) {}
   }
 
+  function patchGraphicsInstance(gfx) {
+    hookGraphicsPrintError(gfx);
+  }
+
   if (typeof window.Graphics !== 'undefined') {
-    patchGraphicsInstance(window.Graphics);
+    hookGraphicsPrintError(window.Graphics);
+  }
+
+  function hookSceneManagerErrors(sm) {
+    if (!sm || (typeof sm !== 'object' && typeof sm !== 'function')) return;
+    try {
+      // 1. SceneManager.onError
+      function wrapOnError(fn) {
+        var wrapper = function (e) {
+          var errorObj = (e && e.error) ? e.error : e;
+          var formatted = formatError(errorObj);
+          var file = (e && (e.filename || e.fileName)) || '';
+          var line = (e && (e.lineno || e.lineNumber)) || 0;
+          report('engine.error', formatted, file, line);
+          if (typeof fn === 'function') {
+            try {
+              return fn.apply(this, arguments);
+            } catch (err) {}
+          }
+        };
+        wrapper.__sparkWrapped = true;
+        return wrapper;
+      }
+
+      var currentOnError = sm.onError;
+      if (typeof currentOnError === 'function' && !currentOnError.__sparkWrapped) {
+        currentOnError = wrapOnError(currentOnError);
+      } else if (!currentOnError) {
+        currentOnError = wrapOnError(null);
+      }
+
+      try {
+        Object.defineProperty(sm, 'onError', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentOnError;
+          },
+          set: function (newFn) {
+            currentOnError = wrapOnError(newFn);
+          }
+        });
+      } catch (err) {
+        sm.onError = currentOnError;
+      }
+
+      // 2. SceneManager.catchException
+      function wrapCatchException(fn) {
+        var wrapper = function (e) {
+          var formatted = formatError(e);
+          report('engine.error', formatted, '', 0);
+          if (typeof fn === 'function') {
+            try {
+              return fn.apply(this, arguments);
+            } catch (err) {}
+          }
+        };
+        wrapper.__sparkWrapped = true;
+        return wrapper;
+      }
+
+      var currentCatchException = sm.catchException;
+      if (typeof currentCatchException === 'function' && !currentCatchException.__sparkWrapped) {
+        currentCatchException = wrapCatchException(currentCatchException);
+      }
+      try {
+        Object.defineProperty(sm, 'catchException', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCatchException;
+          },
+          set: function (newFn) {
+            currentCatchException = wrapCatchException(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCatchException) sm.catchException = currentCatchException;
+      }
+
+      // 3. SceneManager.catchNormalError
+      function wrapCatchNormal(fn) {
+        var wrapper = function (e) {
+          var formatted = formatError(e);
+          report('engine.error', formatted, '', 0);
+          if (typeof fn === 'function') {
+            try {
+              return fn.apply(this, arguments);
+            } catch (err) {}
+          }
+        };
+        wrapper.__sparkWrapped = true;
+        return wrapper;
+      }
+
+      var currentCatchNormal = sm.catchNormalError;
+      if (typeof currentCatchNormal === 'function' && !currentCatchNormal.__sparkWrapped) {
+        currentCatchNormal = wrapCatchNormal(currentCatchNormal);
+      }
+      try {
+        Object.defineProperty(sm, 'catchNormalError', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCatchNormal;
+          },
+          set: function (newFn) {
+            currentCatchNormal = wrapCatchNormal(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCatchNormal) sm.catchNormalError = currentCatchNormal;
+      }
+    } catch (e) {}
   }
 
   // SceneManager: run hook, onError, catchNormalError, and catchException reporting
@@ -1787,6 +2388,17 @@
         var wrappedRun = function (sceneClass) {
           try {
             reapplyStorageAndDataManagerPatches();
+            hookGraphicsPrintError(window.Graphics);
+            hookSceneManagerErrors(sm);
+            if (typeof hookWindowOnError === 'function') hookWindowOnError();
+            if (sceneClass) {
+              if (typeof patchSceneBoot === 'function') patchSceneBoot(sceneClass);
+              if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(sceneClass);
+            }
+            if (window.Scene_Boot) {
+              if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
+              if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+            }
             syncLoadingSpinner();
           } catch (e) {}
           return origRun.apply(this, arguments);
@@ -1795,47 +2407,7 @@
         sm.run = wrappedRun;
       }
 
-      if (typeof sm.onError === 'function' && !sm.onError.__sparkWrapped) {
-        var origOnError = sm.onError;
-        var wrappedOnError = function (e) {
-          var errorObj = (e && e.error) ? e.error : e;
-          var formatted = formatError(errorObj);
-          var file = (e && (e.filename || e.fileName)) || '';
-          var line = (e && (e.lineno || e.lineNumber)) || 0;
-          report('engine.error', formatted, file, line);
-          if (origOnError) {
-            return origOnError.apply(this, arguments);
-          }
-        };
-        wrappedOnError.__sparkWrapped = true;
-        sm.onError = wrappedOnError;
-      }
-
-      if (typeof sm.catchNormalError === 'function' && !sm.catchNormalError.__sparkWrapped) {
-        var origCatchNormalError = sm.catchNormalError;
-        var wrappedCatchNormalError = function (e) {
-          var formatted = formatError(e);
-          report('engine.error', formatted, '', 0);
-          if (origCatchNormalError) {
-            return origCatchNormalError.apply(this, arguments);
-          }
-        };
-        wrappedCatchNormalError.__sparkWrapped = true;
-        sm.catchNormalError = wrappedCatchNormalError;
-      }
-
-      if (typeof sm.catchException === 'function' && !sm.catchException.__sparkWrapped) {
-        var origCatchException = sm.catchException;
-        var wrappedCatchException = function (e) {
-          var formatted = formatError(e);
-          report('engine.error', formatted, '', 0);
-          if (origCatchException) {
-            return origCatchException.apply(this, arguments);
-          }
-        };
-        wrappedCatchException.__sparkWrapped = true;
-        sm.catchException = wrappedCatchException;
-      }
+      hookSceneManagerErrors(sm);
     } catch (e) {}
   }
 
@@ -1984,16 +2556,24 @@
     if (window.Utils) patchUtilsInstance(window.Utils);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
     if (window.Graphics) {
-      patchGraphicsInstance(window.Graphics);
+      if (typeof hookGraphicsPrintError === 'function') hookGraphicsPrintError(window.Graphics);
       hookGraphicsVideo(window.Graphics);
     }
-    if (window.SceneManager) patchSceneManagerInstance(window.SceneManager);
+    if (window.SceneManager) {
+      if (typeof patchSceneManagerInstance === 'function') patchSceneManagerInstance(window.SceneManager);
+      if (typeof hookSceneManagerErrors === 'function') hookSceneManagerErrors(window.SceneManager);
+    }
+    if (window.ImageManager && typeof patchImageManager === 'function') patchImageManager(window.ImageManager);
+    if (window.ColorManager && typeof patchColorManager === 'function') patchColorManager(window.ColorManager);
+    if (window.Scene_Boot) {
+      if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
+      if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+    }
     if (window.StorageManager && window.__sparkPatchStorageManager) {
       window.__sparkPatchStorageManager(window.StorageManager);
     }
     if (window.StorageManager || window.DataManager) {
       reapplyStorageAndDataManagerPatches();
-      syncLoadingSpinner();
       syncLoadingSpinner();
     }
     if (window.Video) hookVideo(window.Video);

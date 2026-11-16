@@ -470,20 +470,35 @@ struct GamePlayerView: View {
             lines = d.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }
 
-        // If the first line is a raw stack frame or URL (@file://, file://, http) and a later line has the actual error name (contains "Error:" or "Exception:"), promote the error headline to the top
-        if let first = lines.first, (first.hasPrefix("@") || first.hasPrefix("file://") || first.hasPrefix("http://") || first.hasPrefix("https://")) {
-            if let errorIdx = lines.firstIndex(where: { $0.contains("Error:") || $0.contains("Exception:") }) {
+        let isStackLine: (String) -> Bool = { line in
+            line.hasPrefix("@") || line.hasPrefix("file://") || line.hasPrefix("http://") || line.hasPrefix("https://")
+                || line.contains(".js:") || line.contains(".js@") || line.contains(".html:")
+        }
+        let hasErrorKeyword: (String) -> Bool = { line in
+            line.contains("Error:") || line.contains("Exception:")
+        }
+
+        // If the first line is a raw stack frame or URL and a later line has the actual error name (contains "Error:" or "Exception:"), promote the error headline to the top
+        if let first = lines.first, (!hasErrorKeyword(first) || isStackLine(first)) {
+            if let errorIdx = lines.firstIndex(where: { hasErrorKeyword($0) && !isStackLine($0) }) {
+                let errLine = lines.remove(at: errorIdx)
+                lines.insert(errLine, at: 0)
+            } else if let errorIdx = lines.firstIndex(where: { hasErrorKeyword($0) }) {
                 let errLine = lines.remove(at: errorIdx)
                 lines.insert(errLine, at: 0)
             } else if let d = detail {
                 let dLines = d.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                if let dErrorLine = dLines.first(where: { $0.contains("Error:") || $0.contains("Exception:") }) {
+                if let dErrorLine = dLines.first(where: { hasErrorKeyword($0) }) {
                     lines.insert(dErrorLine, at: 0)
                 }
             }
         }
 
-        let headline = lines.first ?? message
+        var headline = lines.first ?? message
+        if !hasErrorKeyword(headline) && isStackLine(headline) {
+            headline = "Error: \(headline)"
+        }
+
         var traceParts: [String] = []
         if lines.count > 1 {
             traceParts.append(lines.dropFirst().joined(separator: "\n"))

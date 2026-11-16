@@ -152,9 +152,16 @@
   // MARK: - Error Formatting Helper (JavaScriptCore stack fix)
 
   function formatError(err) {
-    if (!err) return 'Unknown error';
+    if (!err) return 'Error: Unknown error';
     if (Array.isArray(err) && err[0] === 'LoadError') {
-      return 'Failed to load: ' + err[1];
+      return 'LoadError: Failed to load ' + (err[1] || 'resource');
+    }
+    if (typeof err === 'string') {
+      var str = err.trim();
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(str)) {
+        return str;
+      }
+      return 'Error: ' + str;
     }
     if (err instanceof Error || (typeof err === 'object' && err !== null && (err.name || err.message))) {
       var name = err.name || 'Error';
@@ -167,58 +174,14 @@
         if (stack.indexOf(title) === 0) {
           return stack;
         }
-        return title + '\n' + stack;
+        if (message && stack.indexOf(message) === 0) {
+          stack = stack.slice(message.length).replace(/^[\r\n]+/, '');
+        }
+        return title + (stack ? '\n' + stack : '');
       }
       return title;
     }
-    return String(err);
-  }
-
-  // MARK: - VisuStella MZ & PluginManager Compatibility Guards
-
-  function makeSafeVisuMZProxy(target) {
-    if (!target || (typeof target !== 'object' && typeof target !== 'function')) {
-      target = {};
-    }
-    if (target.__sparkIsSafeProxy) return target;
-
-    var ignoredKeys = {
-      'toJSON': true,
-      'then': true,
-      'prototype': true,
-      'constructor': true,
-      'valueOf': true,
-      'inspect': true,
-      'toString': true
-    };
-
-    var handler = {
-      get: function (obj, prop, receiver) {
-        if (prop === '__sparkIsSafeProxy') return true;
-        if (typeof prop === 'symbol') {
-          return Reflect.get(obj, prop, receiver);
-        }
-        var propStr = String(prop);
-        if (ignoredKeys[propStr] || propStr.charAt(0) === '@' || propStr.charAt(0) === '_') {
-          return Reflect.get(obj, prop, receiver);
-        }
-        if (prop in obj) {
-          return obj[prop];
-        }
-        // Missing top-level namespace: assign and return a plain {} object (finite, non-recursive)
-        var plain = {};
-        obj[prop] = plain;
-        return plain;
-      }
-    };
-
-    try {
-      var p = new Proxy(target, handler);
-      target.__sparkIsSafeProxy = true;
-      return p;
-    } catch (e) {
-      return target;
-    }
+    return 'Error: ' + String(err);
   }
 
   // MARK: - JsonEx Cycle Guard & Safe Depth Fallback
@@ -305,30 +268,6 @@
     });
   } catch (e) {}
 
-  var rawVisuMZ = window.VisuMZ;
-  var visuMZProxy = rawVisuMZ ? makeSafeVisuMZProxy(rawVisuMZ) : null;
-  try {
-    Object.defineProperty(window, 'VisuMZ', {
-      configurable: true,
-      enumerable: true,
-      get: function () {
-        if (!visuMZProxy) {
-          rawVisuMZ = rawVisuMZ || {};
-          visuMZProxy = makeSafeVisuMZProxy(rawVisuMZ);
-        }
-        return visuMZProxy;
-      },
-      set: function (newVal) {
-        if (newVal && typeof newVal === 'object') {
-          rawVisuMZ = newVal;
-          visuMZProxy = makeSafeVisuMZProxy(newVal);
-        } else {
-          rawVisuMZ = newVal;
-          visuMZProxy = null;
-        }
-      }
-    });
-  } catch (e) {}
 
   function sanitizePluginsList(list) {
     if (Array.isArray(list)) {
@@ -409,6 +348,11 @@
     var origInit = gs.prototype.initialize;
     var wrappedInit = function () {
       try {
+        if (window.VisuMZ && !window.VisuMZ.ButtonCommonEvents) {
+          window.VisuMZ.ButtonCommonEvents = {};
+        }
+      } catch (e) {}
+      try {
         return origInit.apply(this, arguments);
       } catch (e) {
         var formatted = formatError(e);
@@ -458,6 +402,87 @@
     });
   } catch (e) {}
 
+  // MARK: - Game_BattlerBase & Game_Actor Trait Objects Sanitizer
+
+  function patchGameBattlerBase(gbb) {
+    if (!gbb || !gbb.prototype) return;
+    try {
+      if (typeof gbb.prototype.traitObjects === 'function' && !gbb.prototype.traitObjects.__sparkWrapped) {
+        var origTraitObjects = gbb.prototype.traitObjects;
+        var wrappedTraitObjects = function () {
+          try {
+            var list = origTraitObjects.call(this);
+            if (Array.isArray(list)) {
+              return list.filter(function (obj) {
+                return obj && Array.isArray(obj.traits);
+              });
+            }
+            return list;
+          } catch (e) {
+            return [];
+          }
+        };
+        wrappedTraitObjects.__sparkWrapped = true;
+        gbb.prototype.traitObjects = wrappedTraitObjects;
+      }
+    } catch (e) {}
+
+    try {
+      if (typeof gbb.prototype.allTraits === 'function' && !gbb.prototype.allTraits.__sparkWrapped) {
+        var origAllTraits = gbb.prototype.allTraits;
+        var wrappedAllTraits = function () {
+          try {
+            var objs = this.traitObjects();
+            if (Array.isArray(objs)) {
+              return objs.reduce(function (r, obj) {
+                return (obj && Array.isArray(obj.traits)) ? r.concat(obj.traits) : r;
+              }, []);
+            }
+          } catch (e) {}
+          try {
+            return origAllTraits.call(this);
+          } catch (e2) {
+            return [];
+          }
+        };
+        wrappedAllTraits.__sparkWrapped = true;
+        gbb.prototype.allTraits = wrappedAllTraits;
+      }
+    } catch (e) {}
+  }
+
+  var rawGameBattlerBase = window.Game_BattlerBase;
+  if (rawGameBattlerBase) patchGameBattlerBase(rawGameBattlerBase);
+  try {
+    Object.defineProperty(window, 'Game_BattlerBase', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawGameBattlerBase;
+      },
+      set: function (val) {
+        rawGameBattlerBase = val;
+        patchGameBattlerBase(val);
+      }
+    });
+  } catch (e) {}
+
+  var rawGameActor = window.Game_Actor;
+  if (rawGameActor) patchGameBattlerBase(rawGameActor);
+  try {
+    Object.defineProperty(window, 'Game_Actor', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawGameActor;
+      },
+      set: function (val) {
+        rawGameActor = val;
+        patchGameBattlerBase(val);
+      }
+    });
+  } catch (e) {}
+
   // MARK: - Console & Exception Logging
 
   var originalConsoleError = window.console ? window.console.error : null;
@@ -497,6 +522,9 @@
 
       var errorObj = event && event.error;
       var message = errorObj ? formatError(errorObj) : ((event && event.message) ? event.message : 'Unknown script error');
+      if (!errorObj && message && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)) {
+        message = 'Error: ' + message;
+      }
       var source = (event && event.filename) ? event.filename : '';
       var line = (event && event.lineno) ? event.lineno : 0;
       var column = (event && event.colno) ? event.colno : 0;
@@ -507,7 +535,18 @@
   var origWindowOnError = window.onerror;
   window.onerror = function (message, source, lineno, colno, error) {
     try {
-      var fullMsg = error ? formatError(error) : (message || 'Unknown script error');
+      var fullMsg = '';
+      if (error) {
+        fullMsg = formatError(error);
+      } else {
+        var strMsg = String(message || 'Unknown script error');
+        var stackPart = (source ? '\n@' + source + (lineno ? ':' + lineno : '') + (colno ? ':' + colno : '') : '');
+        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(strMsg)) {
+          fullMsg = strMsg + stackPart;
+        } else {
+          fullMsg = 'Error: ' + strMsg + stackPart;
+        }
+      }
       report('script', fullMsg, source || '', lineno || 0, { column: colno || 0 });
     } catch (e) {}
     if (typeof origWindowOnError === 'function') {
@@ -1427,8 +1466,11 @@
     if (window.Game_System) {
       patchGameSystem(window.Game_System);
     }
-    if (window.VisuMZ && !window.VisuMZ.__sparkIsSafeProxy) {
-      window.VisuMZ = makeSafeVisuMZProxy(window.VisuMZ);
+    if (window.Game_BattlerBase) {
+      patchGameBattlerBase(window.Game_BattlerBase);
+    }
+    if (window.Game_Actor) {
+      patchGameBattlerBase(window.Game_Actor);
     }
   }
 
@@ -1445,9 +1487,11 @@
 
       var origPrintError = gfx.printError;
       gfx.printError = function (name, message, error) {
-        var title = (name ? name + ': ' : '') + (message || '');
+        var errName = name || (error && error.name) || 'Error';
+        var errMsg = message || (error && error.message) || '';
+        var title = errName + (errMsg ? ': ' + errMsg : '');
         var formatted = error ? formatError(error) : title;
-        if (formatted.indexOf(title) === -1) {
+        if (formatted.indexOf(title) !== 0) {
           formatted = title + '\n' + formatted;
         }
         report('graphics.error', formatted, '', 0);
@@ -1789,6 +1833,15 @@
     var giBool = false;
     var dbLoaded = 'n/a';
     var giLoaded = 'n/a';
+    var allDbFilesLoaded = false;
+
+    var expectedDbFiles = [
+      '$dataActors', '$dataClasses', '$dataSkills', '$dataItems',
+      '$dataWeapons', '$dataArmors', '$dataEnemies', '$dataTroops',
+      '$dataStates', '$dataAnimations', '$dataTilesets', '$dataCommonEvents',
+      '$dataSystem', '$dataMapInfos'
+    ];
+
     if (dm) {
       try {
         if (typeof dm.isDatabaseLoaded === 'function') {
@@ -1802,6 +1855,24 @@
           giLoaded = String(giBool);
         }
       } catch (e) { giLoaded = 'err'; }
+
+      allDbFilesLoaded = true;
+      if (Array.isArray(dm._databaseFiles) && dm._databaseFiles.length > 0) {
+        for (var dfi = 0; dfi < dm._databaseFiles.length; dfi++) {
+          var df = dm._databaseFiles[dfi];
+          if (df && df.name && !window[df.name]) {
+            allDbFilesLoaded = false;
+            break;
+          }
+        }
+      } else {
+        for (var ei = 0; ei < expectedDbFiles.length; ei++) {
+          if (!window[expectedDbFiles[ei]]) {
+            allDbFilesLoaded = false;
+            break;
+          }
+        }
+      }
     }
 
     // Watchdog Safety Recovery:
@@ -1821,7 +1892,8 @@
 
     // Scene_Boot Force-Advance Guard:
     // If Scene_Boot is active when DB and GlobalInfo are already loaded, along with fonts and images:
-    if (sceneName === 'Scene_Boot' && dbBool === true && giBool === true && fmReady && imReady) {
+    // CRITICAL: Scene_Boot must NOT be force-advanced until EVERY database file in DataManager._databaseFiles is truthy.
+    if (sceneName === 'Scene_Boot' && dbBool === true && giBool === true && fmReady && imReady && allDbFilesLoaded) {
       if (scene && !scene._databaseLoaded) {
         scene._databaseLoaded = true;
         if (typeof scene.onDatabaseLoaded === 'function') {
@@ -1833,6 +1905,16 @@
       if (!window.__sparkBootForceAdvanceTimer) {
         window.__sparkBootForceAdvanceTimer = setTimeout(function () {
           window.__sparkBootForceAdvanceTimer = null;
+          var currentDm = window.DataManager;
+          if (currentDm && Array.isArray(currentDm._databaseFiles)) {
+            for (var i = 0; i < currentDm._databaseFiles.length; i++) {
+              var f = currentDm._databaseFiles[i];
+              if (f && f.name && !window[f.name]) {
+                report('info', 'Watchdog cancelled Scene_Boot force-advance: ' + f.name + ' not loaded', '', 0);
+                return;
+              }
+            }
+          }
           var currentSm = window.SceneManager;
           var currentScene = currentSm && (currentSm._scene || currentSm._nextScene);
           var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
@@ -1865,6 +1947,9 @@
           }
         }, 1000);
       }
+    } else if (!allDbFilesLoaded && window.__sparkBootForceAdvanceTimer) {
+      clearTimeout(window.__sparkBootForceAdvanceTimer);
+      window.__sparkBootForceAdvanceTimer = null;
     }
 
     var isSceneReady = true;

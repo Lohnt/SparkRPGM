@@ -343,15 +343,28 @@
     });
   } catch (e) {}
 
+  function ensureButtonCommonEventsDefaults() {
+    try {
+      if (!window.VisuMZ) return;
+      if (!window.VisuMZ.ButtonCommonEvents || typeof window.VisuMZ.ButtonCommonEvents !== 'object') {
+        window.VisuMZ.ButtonCommonEvents = {};
+      }
+      var bce = window.VisuMZ.ButtonCommonEvents;
+      if (!Array.isArray(bce.List)) bce.List = [];
+      if (!Array.isArray(bce.Buttons)) bce.Buttons = [];
+      if (!Array.isArray(bce.Events)) bce.Events = [];
+      if (!Array.isArray(bce.CommonEvents)) bce.CommonEvents = [];
+      if (!Array.isArray(bce.Data)) bce.Data = [];
+      if (!Array.isArray(bce.data)) bce.data = [];
+      if (!bce.Settings || typeof bce.Settings !== 'object') bce.Settings = {};
+    } catch (e) {}
+  }
+
   function patchGameSystem(gs) {
     if (!gs || !gs.prototype || typeof gs.prototype.initialize !== 'function' || gs.prototype.initialize.__sparkWrapped) return;
     var origInit = gs.prototype.initialize;
     var wrappedInit = function () {
-      try {
-        if (window.VisuMZ && !window.VisuMZ.ButtonCommonEvents) {
-          window.VisuMZ.ButtonCommonEvents = {};
-        }
-      } catch (e) {}
+      ensureButtonCommonEventsDefaults();
       try {
         return origInit.apply(this, arguments);
       } catch (e) {
@@ -398,6 +411,86 @@
       set: function (val) {
         rawGameSystem = val;
         patchGameSystem(val);
+      }
+    });
+  } catch (e) {}
+
+  // MARK: - Sprite_ButtonCommonEventsContainer & Scene_Map Button Overlay Guards
+
+  function patchSpriteButtonCommonEventsContainer(cls) {
+    if (!cls || !cls.prototype) return;
+    ensureButtonCommonEventsDefaults();
+
+    var methods = ['initialize', 'createButtons', 'refresh', 'setupButtons', 'update'];
+    for (var i = 0; i < methods.length; i++) {
+      var methodName = methods[i];
+      try {
+        if (typeof cls.prototype[methodName] === 'function' && !cls.prototype[methodName].__sparkWrapped) {
+          (function (mName, origMethod) {
+            var wrappedMethod = function () {
+              ensureButtonCommonEventsDefaults();
+              try {
+                return origMethod.apply(this, arguments);
+              } catch (e) {
+                report('info', 'Sprite_ButtonCommonEventsContainer.' + mName + ' recovered: ' + formatError(e), '', 0);
+                return null;
+              }
+            };
+            wrappedMethod.__sparkWrapped = true;
+            cls.prototype[mName] = wrappedMethod;
+          })(methodName, cls.prototype[methodName]);
+        }
+      } catch (err) {}
+    }
+  }
+
+  var rawButtonContainer = window.Sprite_ButtonCommonEventsContainer;
+  if (rawButtonContainer) patchSpriteButtonCommonEventsContainer(rawButtonContainer);
+  try {
+    Object.defineProperty(window, 'Sprite_ButtonCommonEventsContainer', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawButtonContainer;
+      },
+      set: function (val) {
+        rawButtonContainer = val;
+        patchSpriteButtonCommonEventsContainer(val);
+      }
+    });
+  } catch (e) {}
+
+  function patchSceneMap(sm) {
+    if (!sm || !sm.prototype) return;
+    try {
+      if (typeof sm.prototype.createButtonCommonEvents === 'function' && !sm.prototype.createButtonCommonEvents.__sparkWrapped) {
+        var origCreate = sm.prototype.createButtonCommonEvents;
+        var wrappedCreate = function () {
+          ensureButtonCommonEventsDefaults();
+          try {
+            return origCreate.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Map.createButtonCommonEvents recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedCreate.__sparkWrapped = true;
+        sm.prototype.createButtonCommonEvents = wrappedCreate;
+      }
+    } catch (e) {}
+  }
+
+  var rawSceneMap = window.Scene_Map;
+  if (rawSceneMap) patchSceneMap(rawSceneMap);
+  try {
+    Object.defineProperty(window, 'Scene_Map', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawSceneMap;
+      },
+      set: function (val) {
+        rawSceneMap = val;
+        patchSceneMap(val);
       }
     });
   } catch (e) {}
@@ -1263,14 +1356,27 @@
         sm.forageKeys = function () {
           return this._forageKeys || [];
         };
+        sm._forageKeysUpdated = true;
+        sm.forageKeysUpdated = function () {
+          var dm = window.DataManager;
+          if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
+            return true;
+          }
+          return typeof this._forageKeysUpdated === 'boolean' ? this._forageKeysUpdated : true;
+        };
         sm.updateForageKeys = function () {
           this._forageKeys = [];
+          this._forageKeysUpdated = false;
           var self = this;
           return sparkLocalForage.iterate(function (value, key) {
             if (!self.isForageKey || self.isForageKey(key)) {
               self._forageKeys.push(key);
             }
           }).then(function () {
+            self._forageKeysUpdated = true;
+            return self._forageKeys;
+          }).catch(function () {
+            self._forageKeysUpdated = true;
             return self._forageKeys;
           });
         };
@@ -1581,6 +1687,22 @@
       wrapStorageMethod(sm, 'loadFromForage');
       wrapStorageMethod(sm, 'loadZip');
       wrapStorageMethod(sm, 'loadObject');
+      if (typeof sm.forageKeysUpdated === 'function' && !sm.forageKeysUpdated.__sparkWrapped) {
+        var origFKU = sm.forageKeysUpdated;
+        var wrappedFKU = function () {
+          var dm = window.DataManager;
+          if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
+            return true;
+          }
+          try {
+            return origFKU.apply(this, arguments);
+          } catch (e) {
+            return true;
+          }
+        };
+        wrappedFKU.__sparkWrapped = true;
+        sm.forageKeysUpdated = wrappedFKU;
+      }
     }
 
     var dm = window.DataManager;
@@ -1608,6 +1730,13 @@
     if (window.Game_Actor) {
       patchGameActor(window.Game_Actor);
     }
+    if (window.Sprite_ButtonCommonEventsContainer) {
+      patchSpriteButtonCommonEventsContainer(window.Sprite_ButtonCommonEventsContainer);
+    }
+    if (window.Scene_Map) {
+      patchSceneMap(window.Scene_Map);
+    }
+    ensureButtonCommonEventsDefaults();
     if (window.Scene_Boot) {
       patchSceneBoot(window.Scene_Boot);
     }
@@ -2164,7 +2293,8 @@
       return;
     }
 
-    if (now - stallStartTime >= 2500) {
+    var stallThreshold = (sceneName === 'Scene_Boot') ? 6000 : 3500;
+    if (now - stallStartTime >= stallThreshold) {
       syncLoadingSpinner();
 
       if (sceneName === 'Scene_Boot' && scene) {
@@ -2192,7 +2322,7 @@
         if (typeof scene.isReady === 'function') {
           try { bootReasons.push('Scene_Boot.isReady=' + scene.isReady()); } catch (e) { bootReasons.push('Scene_Boot.isReady=err'); }
         }
-        report('info', 'Scene_Boot stall diagnosis (>2.5s): ' + bootReasons.join(', '), '', 0);
+        report('info', 'Scene_Boot stall diagnosis (>' + (stallThreshold / 1000).toFixed(1) + 's): ' + bootReasons.join(', '), '', 0);
       }
 
       if (sceneName === 'Scene_Boot' && dbBool === true && (!dm || !dm.isGlobalInfoLoaded || !dm.isGlobalInfoLoaded())) {
@@ -2295,13 +2425,13 @@
         } catch (e) {}
       }
 
-      var diagnosticText = 'Stall detected (>2.5s):\n' + lines.join('\n');
+      var diagnosticText = 'Stall detected (>' + (stallThreshold / 1000).toFixed(1) + 's):\n' + lines.join('\n');
       reportStall(diagnosticText);
     }
   }
 
-  // Poll continuously every 2.5 seconds
-  setInterval(checkReadinessWatchdog, 2500);
+  // Poll continuously every 1.5 seconds
+  setInterval(checkReadinessWatchdog, 1500);
 
   // MARK: - Milestone Listeners (DOM, main.js, Scenes)
 

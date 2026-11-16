@@ -134,13 +134,6 @@ struct GamePlayerView: View {
             if let error = session.loadError {
                 errorOverlay(message: error, detail: nil)
                     .zIndex(22)
-            } else if session.didStall {
-                errorOverlay(
-                    message: session.bootDiagnostic ?? "The game did not finish starting.",
-                    detail: diagnosticDetail,
-                    showsContinue: true
-                )
-                .zIndex(22)
             } else if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !session.isLoading, isFatalErrorDiagnostic(diagnostic) {
                 errorOverlay(
                     message: diagnostic,
@@ -211,11 +204,14 @@ struct GamePlayerView: View {
     }
 
     private var gameFailed: Bool {
-        session.loadError != nil || session.didStall
+        session.loadError != nil
     }
 
     private func isFatalErrorDiagnostic(_ message: String) -> Bool {
         let lower = message.lowercased()
+        if lower.contains("stall") || lower.contains("stalled") {
+            return false
+        }
         if lower.contains("recovered:") || lower.contains("warning:") || lower.contains("timed out (1000ms); initialized _globalinfo = []") {
             return false
         }
@@ -246,29 +242,31 @@ struct GamePlayerView: View {
         ZStack {
             SparkTheme.canvas.opacity(0.97).ignoresSafeArea()
 
-            VStack(spacing: 14) {
+            VStack(spacing: 16) {
                 ProgressView()
                     .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    .scaleEffect(1.05)
+                    .scaleEffect(1.1)
 
-                Text(game.title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(SparkTheme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 30)
+                VStack(spacing: 6) {
+                    Text(game.title)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(SparkTheme.textPrimary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 30)
 
-                Text(session.bootStage ?? (game.engine.isEasyRPG ? "Starting EasyRPG Player" : "Starting \(game.engine.displayName)"))
-                    .font(.system(size: 11))
-                    .foregroundColor(SparkTheme.textSecondary)
+                    Text("Loading...")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(SparkTheme.textSecondary)
+                }
 
-                if let diagnostic = session.bootDiagnostic {
+                if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, isFatalErrorDiagnostic(diagnostic) {
                     Text(diagnostic)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(SparkTheme.textTertiary)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 34)
-                        .padding(.top, 2)
+                        .padding(.top, 4)
 
                     HStack(spacing: 10) {
                         overlayButton("Retry", highlighted: false) {
@@ -281,11 +279,6 @@ struct GamePlayerView: View {
                     }
                     .padding(.top, 4)
                 } else {
-                    Text("This can take a moment on first launch.")
-                        .font(.system(size: 10))
-                        .foregroundColor(SparkTheme.textTertiary)
-                        .padding(.top, 2)
-
                     Button {
                         close()
                     } label: {
@@ -301,6 +294,7 @@ struct GamePlayerView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(PlainButtonStyle())
+                    .padding(.top, 4)
                 }
             }
         }

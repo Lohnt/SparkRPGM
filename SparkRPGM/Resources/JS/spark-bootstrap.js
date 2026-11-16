@@ -454,11 +454,14 @@
           try {
             ensureHUDDefaults();
             if (window.Scene_Base && typeof patchSceneBase === 'function') {
-      patchSceneBase(window.Scene_Base);
-    }
-    if (window.Scene_Boot) {
+              patchSceneBase(window.Scene_Base);
+            }
+            if (window.Scene_Boot) {
               if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
               if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+            }
+            if (window.Scene_Title && typeof patchSceneTitle === 'function') {
+              patchSceneTitle(window.Scene_Title);
             }
           } catch (e) {}
           return res;
@@ -1650,7 +1653,12 @@
           try {
             return fn.apply(this, arguments);
           } catch (e) {
-            report('info', 'Scene_Base.create recovered: ' + formatError(e), '', 0);
+            var isTitle = this && ((this.constructor && this.constructor.name === 'Scene_Title') || (window.Scene_Title && this instanceof window.Scene_Title));
+            if (isTitle) {
+              report('engine.error', 'Scene_Title.create failed: ' + formatError(e), '', 0);
+            } else {
+              report('info', 'Scene_Base.create recovered: ' + formatError(e), '', 0);
+            }
           }
         };
         wrapped.__sparkWrapped = true;
@@ -1681,7 +1689,12 @@
           try {
             return fn.apply(this, arguments);
           } catch (e) {
-            report('info', 'Scene_Base.start recovered: ' + formatError(e), '', 0);
+            var isTitle = this && ((this.constructor && this.constructor.name === 'Scene_Title') || (window.Scene_Title && this instanceof window.Scene_Title));
+            if (isTitle) {
+              report('engine.error', 'Scene_Title.start failed: ' + formatError(e), '', 0);
+            } else {
+              report('info', 'Scene_Base.start recovered: ' + formatError(e), '', 0);
+            }
             this._started = true;
             this._active = true;
           }
@@ -1920,6 +1933,91 @@
       set: function (val) {
         rawSceneBoot = val;
         patchSceneBoot(val);
+      }
+    });
+  } catch (e) {}
+
+  function patchSceneTitle(st) {
+    if (!st || !st.prototype) return;
+    try {
+      var currentCreate = st.prototype.create;
+      function wrapTitleCreate(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('engine.error', 'Scene_Title.create failed: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCreate === 'function' && !currentCreate.__sparkWrapped) {
+        currentCreate = wrapTitleCreate(currentCreate);
+      }
+      try {
+        Object.defineProperty(st.prototype, 'create', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCreate;
+          },
+          set: function (newFn) {
+            currentCreate = wrapTitleCreate(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCreate) st.prototype.create = currentCreate;
+      }
+
+      var currentStart = st.prototype.start;
+      function wrapTitleStart(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('engine.error', 'Scene_Title.start failed: ' + formatError(e), '', 0);
+            this._started = true;
+            this._active = true;
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentStart === 'function' && !currentStart.__sparkWrapped) {
+        currentStart = wrapTitleStart(currentStart);
+      }
+      try {
+        Object.defineProperty(st.prototype, 'start', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentStart;
+          },
+          set: function (newFn) {
+            currentStart = wrapTitleStart(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentStart) st.prototype.start = currentStart;
+      }
+    } catch (e) {}
+  }
+
+  var rawSceneTitle = window.Scene_Title;
+  if (rawSceneTitle) patchSceneTitle(rawSceneTitle);
+  try {
+    Object.defineProperty(window, 'Scene_Title', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawSceneTitle;
+      },
+      set: function (val) {
+        rawSceneTitle = val;
+        patchSceneTitle(val);
       }
     });
   } catch (e) {}
@@ -3432,6 +3530,9 @@
       if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
       if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
     }
+    if (window.Scene_Title && typeof patchSceneTitle === 'function') {
+      patchSceneTitle(window.Scene_Title);
+    }
     if (window.FontManager && typeof hookFontManager === 'function') {
       hookFontManager(window.FontManager);
     }
@@ -3737,11 +3838,14 @@
               if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(sceneClass);
             }
             if (window.Scene_Base && typeof patchSceneBase === 'function') {
-      patchSceneBase(window.Scene_Base);
-    }
-    if (window.Scene_Boot) {
+              patchSceneBase(window.Scene_Base);
+            }
+            if (window.Scene_Boot) {
               if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
               if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+            }
+            if (window.Scene_Title && typeof patchSceneTitle === 'function') {
+              patchSceneTitle(window.Scene_Title);
             }
             syncLoadingSpinner();
           } catch (e) {}
@@ -3812,7 +3916,13 @@
             }
             return fn.apply(this, arguments);
           } catch (e) {
-            report('info', 'SceneManager.changeScene recovered: ' + formatError(e), '', 0);
+            var currentScene = this._scene || this._nextScene;
+            var isTitle = currentScene && ((currentScene.constructor && currentScene.constructor.name === 'Scene_Title') || (window.Scene_Title && currentScene instanceof window.Scene_Title));
+            if (isTitle) {
+              report('engine.error', 'SceneManager.changeScene failed: ' + formatError(e), '', 0);
+            } else {
+              report('info', 'SceneManager.changeScene recovered: ' + formatError(e), '', 0);
+            }
             if (this._nextScene) {
               this._scene = this._nextScene;
               this._nextScene = null;
@@ -4100,6 +4210,9 @@
       if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
       if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
     }
+    if (window.Scene_Title && typeof patchSceneTitle === 'function') {
+      patchSceneTitle(window.Scene_Title);
+    }
     if (window.FontManager && typeof hookFontManager === 'function') {
       hookFontManager(window.FontManager);
     }
@@ -4312,7 +4425,7 @@
     // Scene_Boot Force-Advance Guard:
     // Once DataManager.isDatabaseLoaded() is true (all $data* globals populated) for > 1.5s while SceneManager._scene instanceof Scene_Boot,
     // automatically call Graphics.endLoading(), ensure Scene_Boot.prototype.onDatabaseLoaded has run,
-    // and if SceneManager._scene is STILL Scene_Boot 1.0s later, explicitly invoke SceneManager.goto(Scene_Title)
+    // and explicitly invoke SceneManager.goto(Scene_Title)
     var isSceneBoot = (sceneName === 'Scene_Boot') || (scene && (scene instanceof (window.Scene_Boot || Object)));
     if (isSceneBoot && (dbBool === true || allDbFilesLoaded)) {
       if (!window.__sparkBootDbLoadedStart) {
@@ -4342,56 +4455,39 @@
           dm._globalInfo = [];
         }
 
-        // If SceneManager._scene is STILL Scene_Boot 1.0s later, explicitly invoke SceneManager.goto(Scene_Title)
-        if (!window.__sparkBootForceAdvanceTimer) {
-          window.__sparkBootForceAdvanceTimer = setTimeout(function () {
-            window.__sparkBootForceAdvanceTimer = null;
-            var currentSm = window.SceneManager;
-            var currentScene = currentSm && (currentSm._scene || currentSm._nextScene);
-            var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
-            if (curName === 'Scene_Boot' || (currentScene && (currentScene instanceof (window.Scene_Boot || Object)))) {
-              report('info', 'Watchdog force-advancing Scene_Boot -> Scene_Title', '', 0);
+        // Once DataManager.isDatabaseLoaded() is true, if SceneManager._scene is still Scene_Boot for > 1.5s,
+        // ensure SceneManager.goto(Scene_Title) is called and Graphics.endLoading() is called
+        var targetScene = window.Scene_Title || null;
+        var currentScene = sm && (sm._scene || sm._nextScene);
+        var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
+        var isCurBoot = (curName === 'Scene_Boot') || (currentScene && (currentScene instanceof (window.Scene_Boot || Object)));
+        if (isCurBoot && targetScene && typeof sm.goto === 'function') {
+          var isAlreadyGoingToTitle = sm._nextScene && ((sm._nextScene.constructor && sm._nextScene.constructor.name === 'Scene_Title') || (targetScene && sm._nextScene instanceof targetScene));
+          if (!isAlreadyGoingToTitle) {
+            if (!window.__sparkLastGotoTitleTime || (Date.now() - window.__sparkLastGotoTitleTime > 2000)) {
+              window.__sparkLastGotoTitleTime = Date.now();
+              report('info', 'Watchdog: Scene_Boot stayed > 1.5s with DB loaded, force-advancing to Scene_Title', '', 0);
               try {
-                if (typeof currentScene.resizeScreen === 'function') {
-                  try { currentScene.resizeScreen(); } catch (e) {}
-                }
-                if (typeof currentScene.updateDocumentTitle === 'function') {
-                  try { currentScene.updateDocumentTitle(); } catch (e) {}
-                }
-                if (typeof currentScene.start === 'function' && !currentScene._started) {
-                  currentScene.start();
-                }
-              } catch (e) {}
-
-              setTimeout(function () {
-                var smAfter = window.SceneManager;
-                var scAfter = smAfter && (smAfter._scene || smAfter._nextScene);
-                var nameAfter = (scAfter && scAfter.constructor && scAfter.constructor.name) || '';
-                if (nameAfter === 'Scene_Boot' || (scAfter && (scAfter instanceof (window.Scene_Boot || Object)))) {
-                  var targetScene = null;
-                  if (window.Scene_Splash && typeof window.Scene_Splash === 'function') {
-                    targetScene = window.Scene_Splash;
-                  } else if (window._mog_splash_screen && typeof window._mog_splash_screen === 'function') {
-                    targetScene = window._mog_splash_screen;
-                  } else {
-                    targetScene = window.Scene_Title || null;
+                if (currentScene) {
+                  currentScene._fadeDuration = 0;
+                  currentScene._fadeOpacity = 0;
+                  if (typeof currentScene.resizeScreen === 'function') {
+                    try { currentScene.resizeScreen(); } catch (e) {}
                   }
-                  if (targetScene && typeof smAfter.goto === 'function') {
-                    report('info', 'SceneManager.goto(' + (targetScene.name || 'Scene_Title') + ') force-transition triggered', '', 0);
-                    try { smAfter.goto(targetScene); } catch (e) {}
+                  if (typeof currentScene.updateDocumentTitle === 'function') {
+                    try { currentScene.updateDocumentTitle(); } catch (e) {}
                   }
                 }
-              }, 300);
+                sm.goto(targetScene);
+              } catch (eGoto) {
+                report('engine.error', 'SceneManager.goto(Scene_Title) failed: ' + formatError(eGoto), '', 0);
+              }
             }
-          }, 1000);
+          }
         }
       }
     } else {
       window.__sparkBootDbLoadedStart = null;
-      if (!allDbFilesLoaded && window.__sparkBootForceAdvanceTimer) {
-        clearTimeout(window.__sparkBootForceAdvanceTimer);
-        window.__sparkBootForceAdvanceTimer = null;
-      }
     }
 
     var isSceneReady = true;
@@ -4405,32 +4501,61 @@
 
     var now = Date.now();
 
-    // Unstick fadeOpacity if scene is started but opacity remains > 0 for > 1.5s
-    if (scene && scene._started && scene._fadeOpacity > 0 && scene._fadeSign >= 0) {
-      if (!scene._sparkFadeStuckTime) {
+    // Unstick fadeOpacity if SceneManager._scene is Scene_Title (or Scene_Map) and opacity remains > 0 for > 1.5s without decreasing
+    var isTitleOrMap = (sceneName === 'Scene_Title' || sceneName === 'Scene_Map') ||
+      (scene && ((window.Scene_Title && scene instanceof window.Scene_Title) || (window.Scene_Map && scene instanceof window.Scene_Map)));
+
+    if (scene && isTitleOrMap && typeof scene._fadeOpacity === 'number' && scene._fadeOpacity > 0) {
+      if (typeof scene._sparkLastFadeOpacity !== 'number' || scene._fadeOpacity < scene._sparkLastFadeOpacity) {
+        scene._sparkLastFadeOpacity = scene._fadeOpacity;
         scene._sparkFadeStuckTime = now;
-      } else if (now - scene._sparkFadeStuckTime > 1500) {
+      } else if (now - (scene._sparkFadeStuckTime || now) > 1500) {
         report('info', 'Watchdog unsticking fadeOpacity on ' + sceneName + ' (was ' + scene._fadeOpacity + ')', '', 0);
         scene._fadeOpacity = 0;
         scene._fadeDuration = 0;
         scene._fadeSign = 0;
+        scene._sparkLastFadeOpacity = 0;
+        scene._sparkFadeStuckTime = null;
         try {
           if (typeof scene.updateColorFilter === 'function') {
             scene.updateColorFilter();
           }
-        } catch (e) {}
+        } catch (eUcf) {}
+        try {
+          if (scene._colorFilter && typeof scene._colorFilter.setBlendColor === 'function') {
+            scene._colorFilter.setBlendColor([0, 0, 0, 0]);
+          }
+        } catch (eUcf2) {}
       }
-    } else if (scene && scene._fadeOpacity === 0) {
+    } else if (scene && (scene._fadeOpacity === 0 || typeof scene._fadeOpacity === 'undefined')) {
       scene._sparkFadeStuckTime = null;
+      scene._sparkLastFadeOpacity = null;
     }
 
-    // Diagnostic line: If remaining on Scene_Boot or Scene_Title with fadeOpacity === 255 for > 4s after launch
+    // Live Scene Telemetry Banner:
+    // After > 2.5s from launch, if SceneManager._scene is still Scene_Boot OR Scene_Title with 0 children (scene.children.length === 0) OR scene._fadeOpacity === 255:
     var elapsedSinceLaunch = now - sparkBootstrapLaunchTime;
+    var ctorName = (scene && scene.constructor && scene.constructor.name) || sceneName || 'None';
+    var isStarted = !!(scene && scene._started);
+    var isActive = !!(scene && scene.isActive && scene.isActive());
+    var childCount = (scene && scene.children && typeof scene.children.length === 'number') ? scene.children.length : 0;
     var fadeVal = (scene && typeof scene._fadeOpacity !== 'undefined') ? scene._fadeOpacity : 'n/a';
-    if (elapsedSinceLaunch > 4000 && !window.__sparkReportedSceneDiagnostic) {
-      if ((sceneName === 'Scene_Boot' || sceneName === 'Scene_Title') && fadeVal === 255) {
-        window.__sparkReportedSceneDiagnostic = true;
-        report('info', 'Scene: ' + sceneName + ', ready=' + isSceneReady + ', fade=' + fadeVal, '', 0);
+
+    var canvasEl = (window.Graphics && window.Graphics._canvas) || document.getElementById('gameCanvas') || document.querySelector('canvas');
+    var cw = canvasEl ? (canvasEl.width || canvasEl.clientWidth || 0) : 0;
+    var ch = canvasEl ? (canvasEl.height || canvasEl.clientHeight || 0) : 0;
+
+    var isTitle = (ctorName === 'Scene_Title') || (window.Scene_Title && scene instanceof window.Scene_Title);
+    var isBoot = (ctorName === 'Scene_Boot') || (window.Scene_Boot && scene instanceof window.Scene_Boot);
+
+    var shouldReportTelemetry = isBoot || (isTitle && (childCount === 0 || fadeVal === 255));
+    if (elapsedSinceLaunch > 2500 && shouldReportTelemetry) {
+      var diagKey = ctorName + '|' + isStarted + '|' + isActive + '|' + childCount + '|' + fadeVal + '|' + cw + 'x' + ch;
+      if (!window.__sparkLastReportedSceneDiag || (window.__sparkLastReportedSceneDiag !== diagKey && (now - (window.__sparkLastReportedSceneDiagTime || 0) > 3000))) {
+        window.__sparkLastReportedSceneDiag = diagKey;
+        window.__sparkLastReportedSceneDiagTime = now;
+        var diagBanner = 'Scene: ' + ctorName + ' | started=' + isStarted + ' | active=' + isActive + ' | children=' + childCount + ' | fade=' + fadeVal + ' | canvas=' + cw + 'x' + ch;
+        report('info', diagBanner, '', 0);
       }
     }
 

@@ -212,7 +212,7 @@ struct GamePlayerView: View {
         if lower.contains("stall") || lower.contains("stalled") {
             return false
         }
-        if lower.contains("recovered:") || lower.contains("warning:") || lower.contains("timed out (1000ms); initialized _globalinfo = []") || lower.contains("scene:") || lower.contains("fade=") {
+        if lower.contains("recovered:") || lower.contains("warning:") || lower.contains("timed out (1000ms); initialized _globalinfo = []") || lower.contains("scene:") || lower.contains("fade=") || lower.contains("children=") || lower.contains("canvas=") {
             return false
         }
         if message == GameSession.slowBootNotice || message == GameSession.missingEngineNotice {

@@ -762,6 +762,73 @@
         if (currentCreate) sb.prototype.create = currentCreate;
       }
     } catch (e) {}
+
+    try {
+      var currentPreloadHUD = sb.prototype.preloadHUDMakerUltraFonts;
+      function wrapPreloadHUD(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.preloadHUDMakerUltraFonts recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentPreloadHUD === 'function' && !currentPreloadHUD.__sparkWrapped) {
+        currentPreloadHUD = wrapPreloadHUD(currentPreloadHUD);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'preloadHUDMakerUltraFonts', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentPreloadHUD;
+          },
+          set: function (newFn) {
+            currentPreloadHUD = wrapPreloadHUD(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentPreloadHUD) sb.prototype.preloadHUDMakerUltraFonts = currentPreloadHUD;
+      }
+    } catch (e) {}
+
+    try {
+      var currentRegisterHUD = sb.prototype.registerHUDMakerUltraFont;
+      function wrapRegisterHUD(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function (font) {
+          try {
+            if (!font) return;
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.registerHUDMakerUltraFont recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentRegisterHUD === 'function' && !currentRegisterHUD.__sparkWrapped) {
+        currentRegisterHUD = wrapRegisterHUD(currentRegisterHUD);
+      }
+      try {
+        Object.defineProperty(sb.prototype, 'registerHUDMakerUltraFont', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentRegisterHUD;
+          },
+          set: function (newFn) {
+            currentRegisterHUD = wrapRegisterHUD(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentRegisterHUD) sb.prototype.registerHUDMakerUltraFont = currentRegisterHUD;
+      }
+    } catch (e) {}
   }
 
   function patchSceneBoot(sb) {
@@ -831,6 +898,33 @@
         };
         wrappedOnDbLoaded.__sparkWrapped = true;
         sb.prototype.onDatabaseLoaded = wrappedOnDbLoaded;
+      }
+
+      if (typeof sb.prototype.preloadHUDMakerUltraFonts === 'function' && !sb.prototype.preloadHUDMakerUltraFonts.__sparkWrapped) {
+        var origPreloadHUD = sb.prototype.preloadHUDMakerUltraFonts;
+        var wrappedPreloadHUD = function () {
+          try {
+            return origPreloadHUD.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.preloadHUDMakerUltraFonts recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedPreloadHUD.__sparkWrapped = true;
+        sb.prototype.preloadHUDMakerUltraFonts = wrappedPreloadHUD;
+      }
+
+      if (typeof sb.prototype.registerHUDMakerUltraFont === 'function' && !sb.prototype.registerHUDMakerUltraFont.__sparkWrapped) {
+        var origRegisterHUD = sb.prototype.registerHUDMakerUltraFont;
+        var wrappedRegisterHUD = function (font) {
+          try {
+            if (!font) return;
+            return origRegisterHUD.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Boot.registerHUDMakerUltraFont recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedRegisterHUD.__sparkWrapped = true;
+        sb.prototype.registerHUDMakerUltraFont = wrappedRegisterHUD;
       }
     } catch (e) {}
   }
@@ -1016,6 +1110,75 @@
       set: function (val) {
         rawSceneBoot = val;
         patchSceneBoot(val);
+      }
+    });
+  } catch (e) {}
+
+  var rawFontManager = window.FontManager;
+  if (rawFontManager) hookFontManager(rawFontManager);
+  try {
+    Object.defineProperty(window, 'FontManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawFontManager;
+      },
+      set: function (val) {
+        rawFontManager = val;
+        hookFontManager(val);
+      }
+    });
+  } catch (e) {}
+
+  var rawPreloadHUD = window.preloadHUDMakerUltraFonts;
+  try {
+    Object.defineProperty(window, 'preloadHUDMakerUltraFonts', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawPreloadHUD;
+      },
+      set: function (fn) {
+        if (typeof fn === 'function' && !fn.__sparkWrapped) {
+          var wrapped = function () {
+            try {
+              return fn.apply(this, arguments);
+            } catch (e) {
+              report('info', 'preloadHUDMakerUltraFonts recovered: ' + formatError(e), '', 0);
+            }
+          };
+          wrapped.__sparkWrapped = true;
+          rawPreloadHUD = wrapped;
+        } else {
+          rawPreloadHUD = fn;
+        }
+      }
+    });
+  } catch (e) {}
+
+  var rawRegisterHUD = window.registerHUDMakerUltraFont;
+  try {
+    Object.defineProperty(window, 'registerHUDMakerUltraFont', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawRegisterHUD;
+      },
+      set: function (fn) {
+        if (typeof fn === 'function' && !fn.__sparkWrapped) {
+          var wrapped = function (font) {
+            try {
+              if (!font) return;
+              return fn.apply(this, arguments);
+            } catch (e) {
+              report('info', 'registerHUDMakerUltraFont recovered: ' + formatError(e), '', 0);
+            }
+          };
+          wrapped.__sparkWrapped = true;
+          rawRegisterHUD = wrapped;
+        } else {
+          rawRegisterHUD = fn;
+        }
       }
     });
   } catch (e) {}
@@ -2225,6 +2388,9 @@
       if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
       if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
     }
+    if (window.FontManager && typeof hookFontManager === 'function') {
+      hookFontManager(window.FontManager);
+    }
     if (window.Graphics && typeof hookGraphicsPrintError === 'function') {
       hookGraphicsPrintError(window.Graphics);
     }
@@ -2592,43 +2758,125 @@
   }
 
   function hookFontManager(fm) {
-    if (!fm || fm.__sparkHooked) return;
+    if (!fm) return;
+    if (fm.__sparkHooked && fm.load && fm.load.__sparkWrapped && fm.isReady && fm.isReady.__sparkWrapped) return;
     fm.__sparkHooked = true;
 
-    var origLoad = fm.load;
-    if (typeof origLoad === 'function') {
-      fm.load = function (family, url) {
-        var self = this;
-        setTimeout(function () {
-          if (self._states && self._states[family] === 'loading') {
-            report('info', 'Font load timed out after 2s, marking loaded: ' + family, url || '', 0);
-            self._states[family] = 'loaded';
+    try {
+      var currentLoad = fm.load;
+      function wrapLoad(orig) {
+        if (!orig || orig.__sparkWrapped) return orig;
+        var wrapped = function (family, url) {
+          if (!family || typeof family !== 'string' || !family.trim()) {
+            return;
           }
-        }, 2000);
-        return origLoad.apply(this, arguments);
-      };
-    }
+          if (!url || typeof url !== 'string' || !url.trim()) {
+            var targetStates = (this && this._states) ? this._states : (window.FontManager && window.FontManager._states ? window.FontManager._states : null);
+            if (targetStates && typeof family === 'string') {
+              targetStates[family] = 'loaded';
+            }
+            return;
+          }
 
-    var origIsReady = fm.isReady;
-    fm.isReady = function () {
-      if (this._states) {
-        for (var family in this._states) {
-          if (this._states[family] === 'loading') {
-            if (!this._sparkTimers) this._sparkTimers = {};
-            if (!this._sparkTimers[family]) {
-              this._sparkTimers[family] = Date.now();
-            } else if (Date.now() - this._sparkTimers[family] > 2000) {
-              report('info', 'Font stalled > 2s in isReady(), marking loaded: ' + family, '', 0);
-              this._states[family] = 'loaded';
+          var self = this;
+          setTimeout(function () {
+            var states = (self && self._states) ? self._states : (window.FontManager && window.FontManager._states ? window.FontManager._states : null);
+            if (states && states[family] === 'loading') {
+              report('info', 'Font load timed out after 2s, marking loaded: ' + family, url || '', 0);
+              states[family] = 'loaded';
+            }
+          }, 2000);
+
+          try {
+            return orig.call(this, family, url);
+          } catch (e) {
+            report('info', 'FontManager.load recovered: ' + formatError(e), (typeof url === 'string' ? url : ''), 0);
+            var errStates = (self && self._states) ? self._states : (window.FontManager && window.FontManager._states ? window.FontManager._states : null);
+            if (errStates && typeof family === 'string') {
+              errStates[family] = 'loaded';
+            }
+            return;
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+
+      if (typeof currentLoad === 'function' && !currentLoad.__sparkWrapped) {
+        currentLoad = wrapLoad(currentLoad);
+      }
+
+      try {
+        Object.defineProperty(fm, 'load', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentLoad;
+          },
+          set: function (newFn) {
+            currentLoad = wrapLoad(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentLoad) fm.load = currentLoad;
+      }
+    } catch (e) {}
+
+    try {
+      var currentIsReady = fm.isReady;
+      function wrapIsReady(orig) {
+        if (!orig || orig.__sparkWrapped) return orig;
+        var wrapped = function () {
+          var states = (this && this._states) ? this._states : (window.FontManager && window.FontManager._states ? window.FontManager._states : null);
+          if (states) {
+            for (var family in states) {
+              if (states[family] === 'loading') {
+                if (!this._sparkTimers) this._sparkTimers = {};
+                if (!this._sparkTimers[family]) {
+                  this._sparkTimers[family] = Date.now();
+                } else if (Date.now() - this._sparkTimers[family] > 2000) {
+                  report('info', 'Font stalled > 2s in isReady(), marking loaded: ' + family, '', 0);
+                  states[family] = 'loaded';
+                }
+              } else if (states[family] === 'error') {
+                report('info', 'Font error in isReady(), marking loaded: ' + family, '', 0);
+                states[family] = 'loaded';
+              }
             }
           }
-        }
+          if (orig) {
+            try {
+              return orig.apply(this, arguments);
+            } catch (e) {
+              report('info', 'FontManager.isReady recovered: ' + formatError(e), '', 0);
+              return true;
+            }
+          }
+          return true;
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
       }
-      if (origIsReady) {
-        return origIsReady.apply(this, arguments);
+
+      if (typeof currentIsReady === 'function' && !currentIsReady.__sparkWrapped) {
+        currentIsReady = wrapIsReady(currentIsReady);
       }
-      return true;
-    };
+
+      try {
+        Object.defineProperty(fm, 'isReady', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentIsReady;
+          },
+          set: function (newFn) {
+            currentIsReady = wrapIsReady(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentIsReady) fm.isReady = currentIsReady;
+      }
+    } catch (e) {}
   }
 
   if (typeof window.Video !== 'undefined') hookVideo(window.Video);
@@ -2653,6 +2901,9 @@
     if (window.Scene_Boot) {
       if (typeof patchSceneBoot === 'function') patchSceneBoot(window.Scene_Boot);
       if (typeof hookSceneBootPrototype === 'function') hookSceneBootPrototype(window.Scene_Boot);
+    }
+    if (window.FontManager && typeof hookFontManager === 'function') {
+      hookFontManager(window.FontManager);
     }
     if (window.StorageManager && window.__sparkPatchStorageManager) {
       window.__sparkPatchStorageManager(window.StorageManager);

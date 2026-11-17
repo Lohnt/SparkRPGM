@@ -119,11 +119,12 @@ final class GameSession: NSObject, ObservableObject {
         configuration.preferences.javaScriptEnabled = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         // Enable local file access and universal access for file:// XHR/fetch
-        configuration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
-        configuration.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
-        sparkSetIfAvailable(configuration.preferences, key: "allowFileAccessFromFileURLs", value: true)
         sparkSetIfAvailable(configuration, key: "allowUniversalAccessFromFileURLs", value: true)
+        sparkSetIfAvailable(configuration, key: "allowFileAccessFromFileURLs", value: true)
+        sparkSetIfAvailable(configuration.preferences, key: "allowFileAccessFromFileURLs", value: true)
         sparkSetIfAvailable(configuration.preferences, key: "allowUniversalAccessFromFileURLs", value: true)
+        sparkSetIfAvailable(configuration.defaultWebpagePreferences, key: "allowFileAccessFromFileURLs", value: true)
+        sparkSetIfAvailable(configuration.defaultWebpagePreferences, key: "allowUniversalAccessFromFileURLs", value: true)
 
         let controller = configuration.userContentController
         controller.add(bridge, name: "sparkLog")
@@ -903,12 +904,16 @@ final class WebBridge: NSObject, WKScriptMessageHandler {
 /// Applies a KVC key only when the object exposes the matching setter, so a
 /// private WebKit key can never raise an Objective-C exception.
 private func sparkSetIfAvailable(_ object: NSObject, key: String, value: Any) {
-    let suffix = key.prefix(1).uppercased() + key.dropFirst()
+    let rawKey = key.hasPrefix("_") ? String(key.dropFirst()) : key
+    let suffix = rawKey.prefix(1).uppercased() + rawKey.dropFirst()
     let selectors = [
-        NSSelectorFromString("set\(suffix):"),
-        NSSelectorFromString("_set\(suffix):")
+        (NSSelectorFromString("set\(suffix):"), rawKey),
+        (NSSelectorFromString("_set\(suffix):"), "_\(rawKey)"),
+        (NSSelectorFromString("_set\(suffix):"), rawKey)
     ]
-    if selectors.contains(where: { object.responds(to: $0) }) {
-        object.setValue(value, forKey: key)
+    for (sel, k) in selectors {
+        if object.responds(to: sel) {
+            object.setValue(value, forKey: k)
+        }
     }
 }

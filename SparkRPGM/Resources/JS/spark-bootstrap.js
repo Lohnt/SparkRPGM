@@ -1003,32 +1003,12 @@
             if (typeof this.checkPlayerLocation === 'function') {
               try { this.checkPlayerLocation(); } catch (eCpl) {}
             }
-            var dm = window.DataManager;
-            var isDataLoaded = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
-              window.$dataSystem && typeof window.$dataSystem === 'object' &&
-              (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
-            if (isDataLoaded && window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
-              var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
-              if (targetScene && typeof window.SceneManager.goto === 'function') {
-                try { window.SceneManager.goto(targetScene); } catch (eGo) {}
-              }
-            }
             return res;
           } catch (e) {
             report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
             try {
               if (typeof this.checkPlayerLocation === 'function') {
                 try { this.checkPlayerLocation(); } catch (eCpl2) {}
-              }
-              var dm2 = window.DataManager;
-              var isDataLoaded2 = dm2 && typeof dm2.isDatabaseLoaded === 'function' && dm2.isDatabaseLoaded() &&
-                window.$dataSystem && typeof window.$dataSystem === 'object' &&
-                (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
-              if (isDataLoaded2 && window.SceneManager) {
-                var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
-                if (target && typeof window.SceneManager.goto === 'function') {
-                  window.SceneManager.goto(target);
-                }
               }
             } catch (e2) {}
           }
@@ -1063,13 +1043,10 @@
           try {
             var ready = fn.apply(this, arguments);
             if (ready) {
-              var dm = window.DataManager;
-              var isDataLoaded = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
-                window.$dataSystem && typeof window.$dataSystem === 'object' &&
-                (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
-              return !!isDataLoaded;
+              var isDataSystemFullyLoaded = !!(window.$dataSystem && Array.isArray(window.$dataSystem.partyMembers));
+              if (!isDataSystemFullyLoaded) return false;
             }
-            return false;
+            return ready;
           } catch (e) {
             report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
             return false;
@@ -1253,32 +1230,12 @@
             if (typeof this.checkPlayerLocation === 'function') {
               try { this.checkPlayerLocation(); } catch (eCpl) {}
             }
-            var dm = window.DataManager;
-            var isDataLoaded = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
-              window.$dataSystem && typeof window.$dataSystem === 'object' &&
-              (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
-            if (isDataLoaded && window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
-              var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
-              if (targetScene && typeof window.SceneManager.goto === 'function') {
-                try { window.SceneManager.goto(targetScene); } catch (eGo) {}
-              }
-            }
             return res;
           } catch (e) {
             report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
             try {
               if (typeof this.checkPlayerLocation === 'function') {
                 try { this.checkPlayerLocation(); } catch (eCpl2) {}
-              }
-              var dm2 = window.DataManager;
-              var isDataLoaded2 = dm2 && typeof dm2.isDatabaseLoaded === 'function' && dm2.isDatabaseLoaded() &&
-                window.$dataSystem && typeof window.$dataSystem === 'object' &&
-                (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
-              if (isDataLoaded2 && window.SceneManager) {
-                var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
-                if (target && typeof window.SceneManager.goto === 'function') {
-                  window.SceneManager.goto(target);
-                }
               }
             } catch (e2) {}
           }
@@ -1292,25 +1249,11 @@
         var wrappedIsReady = function () {
           try {
             var ready = origIsReady.apply(this, arguments);
-            var dm = window.DataManager;
-            var isDataReady = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
-              window.$dataSystem && typeof window.$dataSystem === 'object' &&
-              (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
-
-            if (ready && isDataReady) return true;
-            if (isDataReady) {
-              if (!this._sparkDbLoadedTime) {
-                this._sparkDbLoadedTime = Date.now();
-              } else if (Date.now() - this._sparkDbLoadedTime > 1500) {
-                if (window.Graphics && typeof window.Graphics.endLoading === 'function') {
-                  try { window.Graphics.endLoading(); } catch (eGL) {}
-                }
-                return true;
-              }
-            } else {
-              this._sparkDbLoadedTime = null;
+            if (ready) {
+              var isDataSystemFullyLoaded = !!(window.$dataSystem && Array.isArray(window.$dataSystem.partyMembers));
+              if (!isDataSystemFullyLoaded) return false;
             }
-            return false;
+            return ready;
           } catch (e) {
             report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
             return false;
@@ -3221,7 +3164,7 @@
           sm._forageKeys = sm._forageKeys || [];
         }
         if (typeof sm._forageKeysUpdated !== 'boolean') {
-          sm._forageKeysUpdated = true;
+          sm._forageKeysUpdated = false;
         }
 
         sm.isLocalMode = function () { return false; };
@@ -3274,18 +3217,12 @@
 
         sm.forageKeysUpdated = function () {
           try {
-            var dm = window.DataManager;
-            if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
-              return true;
-            }
-          } catch (e) {}
-          try {
             var target = (this && typeof this._forageKeysUpdated === 'boolean') ? this : sm;
             if (target && typeof target._forageKeysUpdated === 'boolean') {
               return target._forageKeysUpdated;
             }
           } catch (e) {}
-          return true;
+          return false;
         };
 
         sm.updateForageKeys = function () {
@@ -3724,13 +3661,9 @@
         var origFKU = sm.forageKeysUpdated;
         var wrappedFKU = function () {
           try {
-            var dm = window.DataManager;
-            if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
-              return true;
-            }
             return origFKU.apply(this, arguments);
           } catch (e) {
-            return true;
+            return false;
           }
         };
         wrappedFKU.__sparkWrapped = true;
@@ -4833,17 +4766,16 @@
     var imReady = im && typeof im.isReady === 'function' ? im.isReady() : true;
 
     // Scene_Boot Force-Advance Guard:
-    // Once DataManager.isDatabaseLoaded() is true AND window.$dataSystem is loaded (title1Name/gameTitle defined) for > 1.5s while SceneManager._scene instanceof Scene_Boot,
+    // Once DataManager.isDatabaseLoaded() is true AND window.$dataSystem is 100% loaded (partyMembers array populated) for > 3.0s while SceneManager._scene instanceof Scene_Boot,
     // automatically call Graphics.endLoading(), ensure Scene_Boot.prototype.onDatabaseLoaded has run,
     // and explicitly invoke SceneManager.goto(Scene_Title)
-    var isDataSystemReady = !!(window.$dataSystem && typeof window.$dataSystem === 'object' &&
-      (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined'));
-    var isDbReady = (dbBool === true || allDbFilesLoaded) && isDataSystemReady;
+    var isDataSystemFullyLoaded = !!(window.$dataSystem && typeof window.$dataSystem === 'object' && Array.isArray(window.$dataSystem.partyMembers));
+    var isDbReady = (dbBool === true || allDbFilesLoaded) && isDataSystemFullyLoaded;
     var isSceneBoot = (sceneName === 'Scene_Boot') || (scene && (scene instanceof (window.Scene_Boot || Object)));
     if (isSceneBoot && isDbReady) {
       if (!window.__sparkBootDbLoadedStart) {
         window.__sparkBootDbLoadedStart = Date.now();
-      } else if (Date.now() - window.__sparkBootDbLoadedStart > 1500) {
+      } else if (Date.now() - window.__sparkBootDbLoadedStart > 3000) {
         // Automatically call Graphics.endLoading()
         if (gfx && typeof gfx.endLoading === 'function') {
           try { gfx.endLoading(); } catch (eGL) {}
@@ -4868,18 +4800,18 @@
           dm._globalInfo = [];
         }
 
-        // Once DataManager.isDatabaseLoaded() is true and $dataSystem is ready, if SceneManager._scene is still Scene_Boot for > 1.5s,
+        // Once DataManager.isDatabaseLoaded() is true and $dataSystem is ready, if SceneManager._scene is still Scene_Boot for > 3.0s,
         // ensure SceneManager.goto(Scene_Title) is called and Graphics.endLoading() is called
         var targetScene = window.Scene_Title || null;
         var currentScene = sm && (sm._scene || sm._nextScene);
         var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
         var isCurBoot = (curName === 'Scene_Boot') || (currentScene && (currentScene instanceof (window.Scene_Boot || Object)));
-        if (isCurBoot && isDataSystemReady && targetScene && typeof sm.goto === 'function') {
+        if (isCurBoot && isDataSystemFullyLoaded && targetScene && typeof sm.goto === 'function') {
           var isAlreadyGoingToTitle = sm._nextScene && ((sm._nextScene.constructor && sm._nextScene.constructor.name === 'Scene_Title') || (targetScene && sm._nextScene instanceof targetScene));
           if (!isAlreadyGoingToTitle) {
             if (!window.__sparkLastGotoTitleTime || (Date.now() - window.__sparkLastGotoTitleTime > 2000)) {
               window.__sparkLastGotoTitleTime = Date.now();
-              report('info', 'Watchdog: Scene_Boot stayed > 1.5s with DB & $dataSystem loaded, force-advancing to Scene_Title', '', 0);
+              report('info', 'Watchdog: Scene_Boot stayed > 3.0s with DB & $dataSystem loaded, force-advancing to Scene_Title', '', 0);
               try {
                 if (currentScene) {
                   currentScene._fadeDuration = 0;

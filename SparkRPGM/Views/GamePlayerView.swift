@@ -472,8 +472,13 @@ struct GamePlayerView: View {
     }
 
     private func parseErrorMessage(message: String, detail: String?) -> (headline: String, trace: String?) {
-        var lines = message.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        if lines.isEmpty, let d = detail, !d.isEmpty {
+        let cleanMessage = message.replacingOccurrences(of: "$1@", with: "@")
+            .replacingOccurrences(of: "$1", with: "")
+        let cleanDetail = detail?.replacingOccurrences(of: "$1@", with: "@")
+            .replacingOccurrences(of: "$1", with: "")
+
+        var lines = cleanMessage.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if lines.isEmpty, let d = cleanDetail, !d.isEmpty {
             lines = d.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }
 
@@ -493,7 +498,7 @@ struct GamePlayerView: View {
             } else if let errorIdx = lines.firstIndex(where: { hasErrorKeyword($0) }) {
                 let errLine = lines.remove(at: errorIdx)
                 lines.insert(errLine, at: 0)
-            } else if let d = detail {
+            } else if let d = cleanDetail {
                 let dLines = d.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                 if let dErrorLine = dLines.first(where: { hasErrorKeyword($0) }) {
                     lines.insert(dErrorLine, at: 0)
@@ -501,7 +506,7 @@ struct GamePlayerView: View {
             }
         }
 
-        var headline = lines.first ?? message
+        var headline = lines.first ?? cleanMessage
         if !hasErrorKeyword(headline) && isStackLine(headline) {
             headline = "Error: \(headline)"
         }
@@ -510,7 +515,7 @@ struct GamePlayerView: View {
         if lines.count > 1 {
             traceParts.append(lines.dropFirst().joined(separator: "\n"))
         }
-        if let d = detail, !d.isEmpty {
+        if let d = cleanDetail, !d.isEmpty {
             let detailLines = d.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
             let newDetailLines = detailLines.filter { line in
                 line != headline && !traceParts.contains(where: { $0.contains(line) })

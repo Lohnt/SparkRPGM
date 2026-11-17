@@ -15,10 +15,18 @@ private enum LibraryRoute: Identifiable {
     }
 }
 
-private struct LibraryAlert: Identifiable {
-    let id = UUID()
-    let title: String
-    let message: String
+private enum ActiveAlert: Identifiable {
+    case error(title: String, message: String)
+    case deleteGame(Game)
+
+    var id: String {
+        switch self {
+        case .error(let title, let message):
+            return "error_\(title)_\(message)"
+        case .deleteGame(let game):
+            return "delete_\(game.id)"
+        }
+    }
 }
 
 struct LibraryView: View {
@@ -35,10 +43,7 @@ struct LibraryView: View {
     @State private var coverTarget: Game?
     @State private var showCoverSourceDialog = false
 
-    @State private var gameToDelete: Game?
-    @State private var showingDeleteAlert = false
-
-    @State private var alert: LibraryAlert?
+    @State private var activeAlert: ActiveAlert?
 
     private var accent: Color { launcher.settings.accentColor }
 
@@ -115,13 +120,6 @@ struct LibraryView: View {
             .fullScreenCover(item: $selectedGame) { game in
                 GamePlayerView(game: game)
             }
-            .alert(item: $alert) { item in
-                Alert(
-                    title: Text(item.title),
-                    message: Text(item.message),
-                    dismissButton: .default(Text("OK"))
-                )
-            }
             .onChange(of: coordinator.failureMessage) { message in
                 guard let message = message else { return }
                 presentError(message, title: "Import failed")
@@ -134,17 +132,28 @@ struct LibraryView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
-        .alert("Delete Game?", isPresented: $showingDeleteAlert, presenting: gameToDelete) { game in
-            Button("Delete Game and Saves", role: .destructive) {
-                do {
-                    try store.delete(game)
-                } catch {
-                    presentError(error.localizedDescription)
-                }
+        .alert(item: $activeAlert) { alertType in
+            switch alertType {
+            case .error(let title, let message):
+                return Alert(
+                    title: Text(title),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK"))
+                )
+            case .deleteGame(let game):
+                return Alert(
+                    title: Text("Delete \(game.title)?"),
+                    message: Text("The game folder and Documents/save/\(game.folderName) are removed. Zips in backups/ are kept."),
+                    primaryButton: .destructive(Text("Delete Game and Saves")) {
+                        do {
+                            try store.delete(game)
+                        } catch {
+                            presentError(error.localizedDescription)
+                        }
+                    },
+                    secondaryButton: .cancel()
+                )
             }
-            Button("Cancel", role: .cancel) {}
-        } message: { game in
-            Text("The game folder and Documents/save/\(game.folderName) are removed. Zips in backups/ are kept.")
         }
         .onAppear(perform: configureNavigationBar)
     }
@@ -355,8 +364,7 @@ struct LibraryView: View {
                     onBackup: { backup(game) },
                     onHide: { hideGame(game) },
                     onDelete: {
-                        gameToDelete = game
-                        showingDeleteAlert = true
+                        activeAlert = .deleteGame(game)
                     }
                 )
                 .frame(maxWidth: .infinity)
@@ -383,8 +391,7 @@ struct LibraryView: View {
                     onBackup: { backup(game) },
                     onHide: { hideGame(game) },
                     onDelete: {
-                        gameToDelete = game
-                        showingDeleteAlert = true
+                        activeAlert = .deleteGame(game)
                     }
                 )
             }
@@ -511,7 +518,7 @@ struct LibraryView: View {
     }
 
     private func presentError(_ message: String, title: String = "Something went wrong") {
-        alert = LibraryAlert(title: title, message: message)
+        activeAlert = .error(title: title, message: message)
     }
 
     // MARK: - Data

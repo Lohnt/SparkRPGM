@@ -50,6 +50,66 @@
     }
   } catch (e) {}
 
+  // Guarantee inline scripts never leave document.scripts[last].src empty
+  try {
+    var origScriptSrcDesc = Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, 'src');
+    if (origScriptSrcDesc && origScriptSrcDesc.get) {
+      Object.defineProperty(HTMLScriptElement.prototype, 'src', {
+        configurable: true,
+        enumerable: true,
+        get: function () {
+          var val = origScriptSrcDesc.get.call(this);
+          if (!val) {
+            try {
+              var allScripts = document.getElementsByTagName('script');
+              for (var i = allScripts.length - 1; i >= 0; i--) {
+                var s = allScripts[i];
+                var sVal = origScriptSrcDesc.get.call(s);
+                if (sVal) return sVal;
+              }
+            } catch (err) {}
+            return (window.location && window.location.href) || 'js/main.js';
+          }
+          return val;
+        },
+        set: function (url) {
+          return origScriptSrcDesc.set.call(this, url);
+        }
+      });
+    }
+
+    var origScriptGetAttr = HTMLScriptElement.prototype.getAttribute;
+    if (origScriptGetAttr) {
+      HTMLScriptElement.prototype.getAttribute = function (name) {
+        var res = origScriptGetAttr.apply(this, arguments);
+        if (name === 'src' && !res) {
+          return this.src || 'js/main.js';
+        }
+        return res;
+      };
+    }
+
+    var ensureScriptsHaveSrc = function () {
+      try {
+        var allScripts = document.getElementsByTagName('script');
+        var lastSrc = 'js/main.js';
+        for (var i = 0; i < allScripts.length; i++) {
+          var sc = allScripts[i];
+          var scSrc = origScriptGetAttr ? origScriptGetAttr.call(sc, 'src') : sc.getAttribute('src');
+          if (scSrc) {
+            lastSrc = scSrc;
+          } else if (!sc.src) {
+            sc.setAttribute('src', lastSrc);
+          }
+        }
+      } catch (err) {}
+    };
+    ensureScriptsHaveSrc();
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', ensureScriptsHaveSrc, false);
+    }
+  } catch (e) {}
+
   function handlers() {
     return (window.webkit && window.webkit.messageHandlers) || null;
   }
@@ -3400,6 +3460,24 @@
         utils.isNwjs = function () { return false; };
       }
 
+      // Guarantee Utils.canReadGameFiles() returns true so main.js does not abort
+      var _canReadGameFilesFn = function () { return true; };
+      try {
+        Object.defineProperty(utils, 'canReadGameFiles', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return _canReadGameFilesFn;
+          },
+          set: function (newFn) {
+            // Intercept assignment from rmmz_core.js so it always returns true
+            _canReadGameFilesFn = function () { return true; };
+          }
+        });
+      } catch (err) {
+        utils.canReadGameFiles = function () { return true; };
+      }
+
       if (!utils.isOptionValid) {
         utils.isOptionValid = function (name) {
           if (name === 'test' || name === 'btest') return false;
@@ -3410,13 +3488,116 @@
     } catch (e) {}
   }
 
-  // Ensure window.Utils is a normal writable property
-  if (typeof window.Utils === 'undefined') {
-    window.Utils = function Utils() {
+  // Intercept window.Utils so when rmmz_core.js defines Utils, it is immediately patched
+  var rawUtils = window.Utils;
+  if (!rawUtils) {
+    rawUtils = function Utils() {
       throw new Error('This is a static class');
     };
   }
-  patchUtilsInstance(window.Utils);
+  patchUtilsInstance(rawUtils);
+
+  try {
+    Object.defineProperty(window, 'Utils', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawUtils;
+      },
+      set: function (val) {
+        rawUtils = val;
+        patchUtilsInstance(val);
+      }
+    });
+  } catch (e) {
+    window.Utils = rawUtils;
+  }
+
+  // Guarantee Main.prototype.testXhr and printError allow game boot to continue
+  function patchMainInstance(mainObj) {
+    if (!mainObj || (typeof mainObj !== 'object' && typeof mainObj !== 'function')) return;
+    try {
+      var targets = [mainObj];
+      if (mainObj.prototype) targets.push(mainObj.prototype);
+      targets.forEach(function (tgt) {
+        var _testXhrFn = function () { return true; };
+        try {
+          Object.defineProperty(tgt, 'testXhr', {
+            configurable: true,
+            enumerable: true,
+            get: function () { return _testXhrFn; },
+            set: function () { _testXhrFn = function () { return true; }; }
+          });
+        } catch (e) {
+          tgt.testXhr = function () { return true; };
+        }
+      });
+
+      var proto = mainObj.prototype || mainObj;
+      if (proto) {
+        var _printErrorFn = proto.printError;
+        try {
+          Object.defineProperty(proto, 'printError', {
+            configurable: true,
+            enumerable: true,
+            get: function () { return _printErrorFn; },
+            set: function (newFn) {
+              _printErrorFn = function (name, message) {
+                var full = String(name || '') + ' ' + String(message || '');
+                if (full.indexOf('does not allow to read local files') !== -1) {
+                  console.warn('[SparkRPGM] Suppressed "Your browser does not allow to read local files" error; continuing boot');
+                  if (typeof this.loadMainIfLoaded === 'function') {
+                    this.loadMainIfLoaded();
+                    return;
+                  }
+                  if (typeof this.loadMain === 'function') {
+                    this.loadMain();
+                    return;
+                  }
+                }
+                if (typeof newFn === 'function') {
+                  return newFn.apply(this, arguments);
+                }
+              };
+            }
+          });
+        } catch (e) {
+          if (typeof proto.printError === 'function') {
+            var origPE = proto.printError;
+            proto.printError = function (name, message) {
+              var full = String(name || '') + ' ' + String(message || '');
+              if (full.indexOf('does not allow to read local files') !== -1) {
+                console.warn('[SparkRPGM] Suppressed "Your browser does not allow to read local files" error; continuing boot');
+                if (typeof this.loadMainIfLoaded === 'function') {
+                  this.loadMainIfLoaded();
+                  return;
+                }
+              }
+              return origPE.apply(this, arguments);
+            };
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  var rawMain = window.Main;
+  if (rawMain) patchMainInstance(rawMain);
+  try {
+    Object.defineProperty(window, 'Main', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawMain;
+      },
+      set: function (val) {
+        rawMain = val;
+        patchMainInstance(val);
+      }
+    });
+  } catch (e) {
+    if (rawMain) window.Main = rawMain;
+  }
 
   // DataManager: intercept onXhrError and onError to report exact missing file
   function patchDataManagerInstance(dm) {
@@ -4423,6 +4604,7 @@
     enginePollAttempts += 1;
     if (typeof initNWStub === 'function') initNWStub();
     if (window.Utils) patchUtilsInstance(window.Utils);
+    if (window.Main) patchMainInstance(window.Main);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
     if (window.Graphics) {
       if (typeof patchGraphicsInstance === 'function') patchGraphicsInstance(window.Graphics);

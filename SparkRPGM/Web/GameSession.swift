@@ -119,7 +119,7 @@ final class GameSession: NSObject, ObservableObject {
         configuration.preferences.javaScriptEnabled = true
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         // Enable local file access for file:// XHR/fetch
-        sparkSetIfAvailable(configuration.preferences, key: "allowFileAccessFromFileURLs", value: true)
+        configuration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
 
         let controller = configuration.userContentController
         controller.add(bridge, name: "sparkLog")

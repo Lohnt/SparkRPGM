@@ -3952,6 +3952,130 @@
     patchDataManagerInstance(window.DataManager);
   }
 
+  // MARK: - Decrypter & Bitmap Decryption Hooks
+
+  function patchDecrypterInstance(dec) {
+    if (!dec || dec.__sparkPatched) return;
+    dec.__sparkPatched = true;
+
+    function syncKey() {
+      if (window.$dataSystem) {
+        if (window.$dataSystem.hasEncryptedImages) {
+          dec.hasEncryptedImages = true;
+        }
+        if (window.$dataSystem.encryptionKey && !dec._encryptionKey) {
+          dec._encryptionKey = window.$dataSystem.encryptionKey;
+        }
+      }
+    }
+    syncKey();
+
+    var origDecrypt = dec.decryptArrayBuffer;
+    dec.decryptArrayBuffer = function (arrayBuffer) {
+      syncKey();
+      if (!arrayBuffer) return arrayBuffer;
+      try {
+        if (arrayBuffer.byteLength >= 4) {
+          var header = new Uint8Array(arrayBuffer, 0, 4);
+          // PNG magic: 0x89, 0x50, 0x4E, 0x47
+          if (header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47) {
+            return arrayBuffer;
+          }
+          // JPEG magic: 0xFF, 0xD8, 0xFF
+          if (header[0] === 0xFF && header[1] === 0xD8 && header[2] === 0xFF) {
+            return arrayBuffer;
+          }
+          // GIF magic: 'GIF8'
+          if (header[0] === 0x47 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x38) {
+            return arrayBuffer;
+          }
+          // WebP magic: 'RIFF'
+          if (header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46) {
+            return arrayBuffer;
+          }
+        }
+
+        if (typeof origDecrypt === 'function') {
+          return origDecrypt.apply(this, arguments);
+        }
+      } catch (err) {
+        report('info', 'Decrypter.decryptArrayBuffer fallback: ' + err.message, '', 0);
+        return arrayBuffer;
+      }
+      return arrayBuffer;
+    };
+
+    var origCreateBlobUrl = dec.createBlobUrl;
+    dec.createBlobUrl = function (arrayBuffer) {
+      if (!arrayBuffer) return '';
+      try {
+        var mime = 'image/png';
+        if (arrayBuffer.byteLength >= 4) {
+          var h = new Uint8Array(arrayBuffer, 0, 4);
+          if (h[0] === 0xFF && h[1] === 0xD8) mime = 'image/jpeg';
+          else if (h[0] === 0x47 && h[1] === 0x49) mime = 'image/gif';
+          else if (h[0] === 0x52 && h[1] === 0x49) mime = 'image/webp';
+        }
+        var blob = new Blob([arrayBuffer], { type: mime });
+        return (window.URL || window.webkitURL).createObjectURL(blob);
+      } catch (e) {
+        if (typeof origCreateBlobUrl === 'function') {
+          return origCreateBlobUrl.apply(this, arguments);
+        }
+      }
+      return '';
+    };
+  }
+
+  var rawDecrypter = window.Decrypter;
+  if (rawDecrypter) patchDecrypterInstance(rawDecrypter);
+  try {
+    Object.defineProperty(window, 'Decrypter', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawDecrypter;
+      },
+      set: function (val) {
+        rawDecrypter = val;
+        patchDecrypterInstance(val);
+      }
+    });
+  } catch (e) {
+    if (rawDecrypter) window.Decrypter = rawDecrypter;
+  }
+
+  function patchBitmapPrototype(bmpProto) {
+    if (!bmpProto || bmpProto.__sparkPatched) return;
+    bmpProto.__sparkPatched = true;
+
+    var origOnError = bmpProto._onError;
+    bmpProto._onError = function () {
+      var url = this._url || 'unknown';
+      report('info', 'Bitmap load error: ' + url, url, 0);
+      if (typeof origOnError === 'function') {
+        return origOnError.apply(this, arguments);
+      }
+    };
+  }
+  if (window.Bitmap && window.Bitmap.prototype) {
+    patchBitmapPrototype(window.Bitmap.prototype);
+  }
+  var rawBitmap = window.Bitmap;
+  try {
+    Object.defineProperty(window, 'Bitmap', {
+      configurable: true,
+      enumerable: true,
+      get: function () { return rawBitmap; },
+      set: function (val) {
+        rawBitmap = val;
+        if (val && val.prototype) patchBitmapPrototype(val.prototype);
+      }
+    });
+  } catch (e) {
+    if (rawBitmap) window.Bitmap = rawBitmap;
+  }
+
   // MARK: - Graphics.printError & SceneManager.onError Overwrite Locks
 
   function formatGraphicsError(name, message, error) {
@@ -4049,22 +4173,87 @@
 
   function ensureCanvasVisible() {
     try {
-      var canvas = document.getElementById('gameCanvas') || (window.Graphics && window.Graphics._canvas);
-      if (canvas) {
-        if (canvas.style) {
-          canvas.style.display = 'block';
-          canvas.style.visibility = 'visible';
-          canvas.style.opacity = '1';
-          if (canvas.style.width === '0px' || canvas.style.width === '0') canvas.style.width = '100%';
-          if (canvas.style.height === '0px' || canvas.style.height === '0') canvas.style.height = '100%';
+      var gfx = window.Graphics;
+      var renderer = (gfx && (gfx._renderer || (gfx._app && gfx._app.renderer))) || null;
+      var rendererCanvas = (renderer && renderer.view) || (gfx && gfx._app && gfx._app.view) || null;
+      var domCanvas = document.getElementById('gameCanvas') || document.querySelector('canvas');
+      var canvas = rendererCanvas || (gfx && gfx._canvas) || domCanvas;
+
+      if (rendererCanvas) {
+        if (!rendererCanvas.parentNode || rendererCanvas.parentNode !== document.body) {
+          (document.body || document.documentElement).appendChild(rendererCanvas);
         }
-        var gfx = window.Graphics;
+      }
+
+      if (canvas) {
+        if (!canvas.id) canvas.id = 'gameCanvas';
+        if (canvas.style) {
+          canvas.style.position = 'fixed';
+          canvas.style.inset = '0';
+          canvas.style.top = '0';
+          canvas.style.left = '0';
+          canvas.style.width = '100%';
+          canvas.style.height = '100%';
+          canvas.style.zIndex = '1';
+          canvas.style.display = 'block';
+          canvas.style.opacity = '1';
+          canvas.style.visibility = 'visible';
+          canvas.style.objectFit = 'contain';
+          canvas.style.touchAction = 'none';
+        }
+
         var w = (gfx && (gfx._width || gfx.width)) || window.innerWidth || 816;
         var h = (gfx && (gfx._height || gfx.height)) || window.innerHeight || 624;
         if (!canvas.width || canvas.width <= 0) canvas.width = w;
         if (!canvas.height || canvas.height <= 0) canvas.height = h;
+
+        // Hide any stale / duplicate canvases that are NOT the active renderer canvas
+        var allCanvases = document.querySelectorAll('canvas');
+        for (var i = 0; i < allCanvases.length; i++) {
+          var c = allCanvases[i];
+          if (c !== canvas) {
+            c.style.display = 'none';
+            c.style.zIndex = '0';
+            c.style.pointerEvents = 'none';
+          }
+        }
+      }
+
+      // Ensure no opaque overlays cover the canvas
+      var errorPrinter = document.getElementById('errorPrinter');
+      if (errorPrinter && !window._sparkLastError) {
+        errorPrinter.style.display = 'none';
+        errorPrinter.style.zIndex = '0';
+      }
+      var spinner = document.getElementById('loadingSpinner');
+      if (spinner && (window.SceneManager && window.SceneManager._scene)) {
+        spinner.style.display = 'none';
+        spinner.style.zIndex = '0';
       }
     } catch (e) {}
+  }
+
+  function hookGraphicsRender(gfx) {
+    if (!gfx || (gfx.render && gfx.render.__sparkWrapped)) return;
+    if (gfx._app && !gfx._renderer && gfx._app.renderer) {
+      gfx._renderer = gfx._app.renderer;
+    }
+    var origRender = gfx.render;
+    var wrappedRender = function (stage) {
+      var renderer = this._renderer || (this._app && this._app.renderer);
+      var targetStage = stage || (this._app && this._app.stage) || (window.SceneManager && window.SceneManager._scene);
+      if (renderer && targetStage && typeof renderer.render === 'function') {
+        try {
+          renderer.render(targetStage);
+          return;
+        } catch (eRender) {}
+      }
+      if (typeof origRender === 'function') {
+        return origRender.apply(this, arguments);
+      }
+    };
+    wrappedRender.__sparkWrapped = true;
+    gfx.render = wrappedRender;
   }
 
   function hookGraphicsInitialize(gfx) {
@@ -4074,6 +4263,7 @@
       try {
         var res = origInit.apply(this, arguments);
         ensureCanvasVisible();
+        hookGraphicsRender(gfx);
         return res;
       } catch (e) {
         report('info', 'Graphics.initialize error: ' + formatError(e), '', 0);
@@ -4087,6 +4277,7 @@
   function patchGraphicsInstance(gfx) {
     hookGraphicsPrintError(gfx);
     hookGraphicsInitialize(gfx);
+    hookGraphicsRender(gfx);
     ensureCanvasVisible();
   }
 
@@ -4262,6 +4453,30 @@
         };
         wrappedUpdate.__sparkWrapped = true;
         sm.update = wrappedUpdate;
+      }
+
+      // Ensure SceneManager.renderScene invokes Graphics._renderer.render
+      if (typeof sm.renderScene === 'function' && !sm.renderScene.__sparkWrapped) {
+        var origRenderScene = sm.renderScene;
+        var wrappedRenderScene = function () {
+          var gfx = window.Graphics;
+          if (gfx && !gfx._renderer && gfx._app && gfx._app.renderer) {
+            gfx._renderer = gfx._app.renderer;
+          }
+          if (typeof origRenderScene === 'function') {
+            origRenderScene.apply(this, arguments);
+          } else if (gfx && typeof gfx.render === 'function') {
+            gfx.render(this._scene);
+          }
+          try {
+            var rend = gfx && (gfx._renderer || (gfx._app && gfx._app.renderer));
+            if (rend && this._scene && typeof rend.render === 'function') {
+              rend.render(this._scene);
+            }
+          } catch (eRend) {}
+        };
+        wrappedRenderScene.__sparkWrapped = true;
+        sm.renderScene = wrappedRenderScene;
       }
 
       // 4. SceneManager.goto
@@ -4606,6 +4821,8 @@
     if (window.Utils) patchUtilsInstance(window.Utils);
     if (window.Main) patchMainInstance(window.Main);
     if (window.DataManager) patchDataManagerInstance(window.DataManager);
+    if (window.Decrypter && typeof patchDecrypterInstance === 'function') patchDecrypterInstance(window.Decrypter);
+    if (window.Bitmap && window.Bitmap.prototype && typeof patchBitmapPrototype === 'function') patchBitmapPrototype(window.Bitmap.prototype);
     if (window.Graphics) {
       if (typeof patchGraphicsInstance === 'function') patchGraphicsInstance(window.Graphics);
       if (typeof hookGraphicsPrintError === 'function') hookGraphicsPrintError(window.Graphics);
@@ -4773,6 +4990,7 @@
     try {
       var renderer = gfx._renderer || (gfx._app && gfx._app.renderer);
       if (renderer) {
+        if (!gfx._renderer) gfx._renderer = renderer;
         var rw = renderer.width || 0;
         var rh = renderer.height || 0;
         if (rw === 0 || rh === 0) {
@@ -4781,6 +4999,9 @@
           if (typeof renderer.resize === 'function') {
             renderer.resize(targetW, targetH);
           }
+        }
+        if (sm && sm._scene && typeof renderer.render === 'function') {
+          renderer.render(sm._scene);
         }
       }
 
@@ -4811,6 +5032,35 @@
     } catch (e) {}
   }
 
+  function getBitmapHealthStats() {
+    var im = window.ImageManager;
+    var total = 0;
+    var loaded = 0;
+    var errors = 0;
+    if (im && im._cache) {
+      var cache = im._cache;
+      for (var k in cache) {
+        if (Object.prototype.hasOwnProperty.call(cache, k)) {
+          var item = cache[k];
+          var bmp = (item && item.bitmap) ? item.bitmap : item;
+          if (bmp && (bmp._loadingState || typeof bmp.isReady === 'function')) {
+            total++;
+            if (bmp.isReady && bmp.isReady()) {
+              loaded++;
+            } else if (bmp._loadingState === 'loaded' || (bmp._image && bmp._image.width > 0)) {
+              loaded++;
+            } else if (bmp.isError && bmp.isError()) {
+              errors++;
+            } else if (bmp._loadingState === 'error') {
+              errors++;
+            }
+          }
+        }
+      }
+    }
+    return { total: total, loaded: loaded, errors: errors };
+  }
+
   function getSceneTelemetryString() {
     var sm = window.SceneManager;
     var gfx = window.Graphics;
@@ -4821,12 +5071,12 @@
     var childCount = (scene && scene.children && typeof scene.children.length === 'number') ? scene.children.length : 0;
     var fadeVal = (scene && typeof scene._fadeOpacity !== 'undefined') ? scene._fadeOpacity : 'n/a';
 
-    var canvasEl = (gfx && gfx._canvas) || document.getElementById('gameCanvas') || document.querySelector('canvas');
+    var renderer = (gfx && (gfx._renderer || (gfx._app && gfx._app.renderer))) || null;
+    var canvasEl = (renderer && renderer.view) || (gfx && gfx._canvas) || document.getElementById('gameCanvas') || document.querySelector('canvas');
     var cw = canvasEl ? (canvasEl.width || canvasEl.clientWidth || 0) : 0;
     var ch = canvasEl ? (canvasEl.height || canvasEl.clientHeight || 0) : 0;
 
     var rendType = 'none';
-    var renderer = (gfx && (gfx._renderer || (gfx._app && gfx._app.renderer))) || null;
     if (renderer) {
       if (renderer.type === 1) {
         rendType = 'WebGL';
@@ -4839,19 +5089,75 @@
       }
     }
 
-    return 'Scene: ' + ctorName +
+    var bStats = getBitmapHealthStats();
+    var hasEnc = !!(window.Decrypter && window.Decrypter.hasEncryptedImages);
+    var encStr = hasEnc ? 'true' : 'false';
+
+    var str = 'Scene: ' + ctorName +
       ' | started=' + isStarted +
       ' | active=' + isActive +
       ' | children=' + childCount +
       ' | fade=' + fadeVal +
       ' | canvas=' + cw + 'x' + ch +
-      ' | renderer=' + rendType;
+      ' | renderer=' + rendType +
+      ' | bitmaps=' + bStats.loaded + '/' + bStats.total +
+      ' | enc=' + encStr;
+    if (bStats.errors > 0) {
+      str += ' | err=' + bStats.errors;
+    }
+    return str;
   }
 
   var sceneHeartbeatTimer = null;
   function emitSceneHeartbeat() {
     try {
       checkAndDriveGraphicsRender();
+
+      var sm = window.SceneManager;
+      var scene = (sm && (sm._scene || sm._nextScene)) || null;
+      var ctorName = (scene && scene.constructor && scene.constructor.name) || '';
+      var bStats = getBitmapHealthStats();
+
+      // Check if Scene_Title or Scene_Map is active and healthy
+      var isTitleOrMap = (ctorName === 'Scene_Title' || ctorName === 'Scene_Map') ||
+        (scene && window.Scene_Title && (scene instanceof window.Scene_Title)) ||
+        (scene && window.Scene_Map && (scene instanceof window.Scene_Map));
+
+      var isHealthyTitleOrMap = isTitleOrMap && (bStats.total === 0 || bStats.loaded > 0) && (bStats.errors === 0);
+
+      if (isHealthyTitleOrMap) {
+        // Auto-dismiss diagnostic pill once Scene_Title or Scene_Map is running with loaded bitmaps
+        post('sparkError', {
+          kind: 'diagnostic',
+          message: '',
+          source: '',
+          line: 0
+        });
+        if (sceneHeartbeatTimer) {
+          clearInterval(sceneHeartbeatTimer);
+          sceneHeartbeatTimer = null;
+        }
+        return;
+      }
+
+      // Splash screen advancement guard: if Scene_Splash_Screen stays for > 3.5s, trigger progression
+      if (ctorName === 'Scene_Splash_Screen' || (ctorName.toLowerCase().indexOf('splash') !== -1)) {
+        if (typeof window.__sparkSplashScreenStartTime !== 'number') {
+          window.__sparkSplashScreenStartTime = Date.now();
+        } else if (Date.now() - window.__sparkSplashScreenStartTime > 3500) {
+          try {
+            if (scene && typeof scene.gotoNextScene === 'function') {
+              scene.gotoNextScene();
+            } else if (scene && typeof scene.onSplashFinished === 'function') {
+              scene.onSplashFinished();
+            } else if (window.TouchInput && typeof window.TouchInput._onTrigger === 'function') {
+              window.TouchInput._onTrigger(100, 100);
+            } else if (window.Input && typeof window.Input._onKeyDown === 'function') {
+              window.Input._onKeyDown({ keyCode: 13, preventDefault: function () {} });
+            }
+          } catch (eSplash) {}
+        }
+      }
 
       var telemetry = getSceneTelemetryString();
       post('sparkLog', telemetry);
@@ -4861,15 +5167,6 @@
         source: '',
         line: 0
       });
-
-      var sm = window.SceneManager;
-      var scene = (sm && (sm._scene || sm._nextScene)) || null;
-      var ctorName = (scene && scene.constructor && scene.constructor.name) || '';
-      var isMap = (ctorName === 'Scene_Map') || (scene && window.Scene_Map && (scene instanceof window.Scene_Map));
-      if (isMap && sceneHeartbeatTimer) {
-        clearInterval(sceneHeartbeatTimer);
-        sceneHeartbeatTimer = null;
-      }
     } catch (e) {}
   }
 

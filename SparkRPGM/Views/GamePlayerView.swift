@@ -160,7 +160,7 @@ struct GamePlayerView: View {
                     .zIndex(8)
             }
 
-            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, (!session.isLoading || diagnostic.contains("Scene:")), !isFatalErrorDiagnostic(diagnostic) {
+            if shouldShowDiagnosticBanner, let diagnostic = session.bootDiagnostic {
                 errorBanner(diagnostic)
                     .zIndex(25)
             }
@@ -205,6 +205,24 @@ struct GamePlayerView: View {
 
     private var gameFailed: Bool {
         session.loadError != nil
+    }
+
+    private var shouldShowDiagnosticBanner: Bool {
+        guard let diagnostic = session.bootDiagnostic,
+              !session.isDiagnosticDismissed,
+              !gameFailed else { return false }
+        if isFatalErrorDiagnostic(diagnostic) { return false }
+        if diagnostic.contains("Scene:") {
+            let isTitleOrMap = diagnostic.contains("Scene: Scene_Title") || diagnostic.contains("Scene: Scene_Map")
+            if isTitleOrMap {
+                let hasBitmapError = diagnostic.contains("err=") || diagnostic.contains("bitmaps=0/")
+                if !hasBitmapError {
+                    return false
+                }
+            }
+            return true
+        }
+        return !session.isLoading
     }
 
     private func isFatalErrorDiagnostic(_ message: String) -> Bool {

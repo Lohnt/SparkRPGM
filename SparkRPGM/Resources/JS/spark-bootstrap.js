@@ -250,9 +250,7 @@
           window._sparkLastError = this;
           var rawStack = '';
           try { rawStack = origStackDesc.get.call(this) || ''; } catch (e) {}
-          if (rawStack) {
-            rawStack = String(rawStack).replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
-          }
+          rawStack = rawStack ? String(rawStack).trim() : '';
           var name = (this && this.name) || 'Error';
           var message = (this && this.message) || '';
           var title = name + (message ? ': ' + message : '');
@@ -283,7 +281,6 @@
     }
     if (typeof err === 'string') {
       var str = err.trim();
-      str = str.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
       if (/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(str)) {
         return str;
       }
@@ -303,7 +300,6 @@
       var title = name + (message ? ': ' + message : '');
       var stack = err.stack ? String(err.stack).trim() : '';
       if (stack) {
-        stack = stack.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
         // JavaScriptCore on iOS omits the error name and message from stack.
         // Prepend "name: message" if not already present at the start.
         if (stack.indexOf(title) === 0) {
@@ -1007,7 +1003,11 @@
             if (typeof this.checkPlayerLocation === 'function') {
               try { this.checkPlayerLocation(); } catch (eCpl) {}
             }
-            if (window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
+            var dm = window.DataManager;
+            var isDataLoaded = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
+              window.$dataSystem && typeof window.$dataSystem === 'object' &&
+              (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
+            if (isDataLoaded && window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
               var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
               if (targetScene && typeof window.SceneManager.goto === 'function') {
                 try { window.SceneManager.goto(targetScene); } catch (eGo) {}
@@ -1020,7 +1020,11 @@
               if (typeof this.checkPlayerLocation === 'function') {
                 try { this.checkPlayerLocation(); } catch (eCpl2) {}
               }
-              if (window.SceneManager) {
+              var dm2 = window.DataManager;
+              var isDataLoaded2 = dm2 && typeof dm2.isDatabaseLoaded === 'function' && dm2.isDatabaseLoaded() &&
+                window.$dataSystem && typeof window.$dataSystem === 'object' &&
+                (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
+              if (isDataLoaded2 && window.SceneManager) {
                 var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
                 if (target && typeof window.SceneManager.goto === 'function') {
                   window.SceneManager.goto(target);
@@ -1057,10 +1061,18 @@
         if (!fn) return fn;
         var wrapped = function () {
           try {
-            return fn.apply(this, arguments);
+            var ready = fn.apply(this, arguments);
+            if (ready) {
+              var dm = window.DataManager;
+              var isDataLoaded = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
+                window.$dataSystem && typeof window.$dataSystem === 'object' &&
+                (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
+              return !!isDataLoaded;
+            }
+            return false;
           } catch (e) {
             report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
-            return true;
+            return false;
           }
         };
         wrapped.__sparkWrapped = true;
@@ -1241,7 +1253,11 @@
             if (typeof this.checkPlayerLocation === 'function') {
               try { this.checkPlayerLocation(); } catch (eCpl) {}
             }
-            if (window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
+            var dm = window.DataManager;
+            var isDataLoaded = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
+              window.$dataSystem && typeof window.$dataSystem === 'object' &&
+              (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
+            if (isDataLoaded && window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
               var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
               if (targetScene && typeof window.SceneManager.goto === 'function') {
                 try { window.SceneManager.goto(targetScene); } catch (eGo) {}
@@ -1254,7 +1270,11 @@
               if (typeof this.checkPlayerLocation === 'function') {
                 try { this.checkPlayerLocation(); } catch (eCpl2) {}
               }
-              if (window.SceneManager) {
+              var dm2 = window.DataManager;
+              var isDataLoaded2 = dm2 && typeof dm2.isDatabaseLoaded === 'function' && dm2.isDatabaseLoaded() &&
+                window.$dataSystem && typeof window.$dataSystem === 'object' &&
+                (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
+              if (isDataLoaded2 && window.SceneManager) {
                 var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
                 if (target && typeof window.SceneManager.goto === 'function') {
                   window.SceneManager.goto(target);
@@ -1272,9 +1292,13 @@
         var wrappedIsReady = function () {
           try {
             var ready = origIsReady.apply(this, arguments);
-            if (ready) return true;
             var dm = window.DataManager;
-            if (dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded()) {
+            var isDataReady = dm && typeof dm.isDatabaseLoaded === 'function' && dm.isDatabaseLoaded() &&
+              window.$dataSystem && typeof window.$dataSystem === 'object' &&
+              (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined');
+
+            if (ready && isDataReady) return true;
+            if (isDataReady) {
               if (!this._sparkDbLoadedTime) {
                 this._sparkDbLoadedTime = Date.now();
               } else if (Date.now() - this._sparkDbLoadedTime > 1500) {
@@ -1283,11 +1307,13 @@
                 }
                 return true;
               }
+            } else {
+              this._sparkDbLoadedTime = null;
             }
-            return ready;
+            return false;
           } catch (e) {
             report('info', 'Scene_Boot.isReady recovered: ' + formatError(e), '', 0);
-            return true;
+            return false;
           }
         };
         wrappedIsReady.__sparkWrapped = true;
@@ -2061,6 +2087,143 @@
         });
       } catch (err) {
         if (currentCreate) st.prototype.create = currentCreate;
+      }
+
+      var currentCreateBg = st.prototype.createBackground;
+      function wrapTitleCreateBg(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            if (!window.$dataSystem) {
+              var gw = (window.Graphics && window.Graphics.width) || window.innerWidth || 816;
+              var gh = (window.Graphics && window.Graphics.height) || window.innerHeight || 624;
+              var bmp1 = (window.Bitmap && typeof window.Bitmap === 'function') ? new window.Bitmap(gw, gh) : null;
+              var bmp2 = (window.Bitmap && typeof window.Bitmap === 'function') ? new window.Bitmap(gw, gh) : null;
+              this._backSprite1 = (window.Sprite && typeof window.Sprite === 'function') ? new window.Sprite(bmp1) : {};
+              this._backSprite2 = (window.Sprite && typeof window.Sprite === 'function') ? new window.Sprite(bmp2) : {};
+              if (typeof this.addChild === 'function') {
+                if (this._backSprite1) this.addChild(this._backSprite1);
+                if (this._backSprite2) this.addChild(this._backSprite2);
+              }
+              return;
+            }
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Title.createBackground recovered: ' + formatError(e), '', 0);
+            try {
+              var gw2 = (window.Graphics && window.Graphics.width) || window.innerWidth || 816;
+              var gh2 = (window.Graphics && window.Graphics.height) || window.innerHeight || 624;
+              var b1 = (window.Bitmap && typeof window.Bitmap === 'function') ? new window.Bitmap(gw2, gh2) : null;
+              var b2 = (window.Bitmap && typeof window.Bitmap === 'function') ? new window.Bitmap(gw2, gh2) : null;
+              this._backSprite1 = this._backSprite1 || ((window.Sprite && typeof window.Sprite === 'function') ? new window.Sprite(b1) : {});
+              this._backSprite2 = this._backSprite2 || ((window.Sprite && typeof window.Sprite === 'function') ? new window.Sprite(b2) : {});
+              if (typeof this.addChild === 'function') {
+                if (this._backSprite1 && (!this.children || this.children.indexOf(this._backSprite1) === -1)) this.addChild(this._backSprite1);
+                if (this._backSprite2 && (!this.children || this.children.indexOf(this._backSprite2) === -1)) this.addChild(this._backSprite2);
+              }
+            } catch (e2) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCreateBg === 'function' && !currentCreateBg.__sparkWrapped) {
+        currentCreateBg = wrapTitleCreateBg(currentCreateBg);
+      }
+      try {
+        Object.defineProperty(st.prototype, 'createBackground', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCreateBg;
+          },
+          set: function (newFn) {
+            currentCreateBg = wrapTitleCreateBg(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCreateBg) st.prototype.createBackground = currentCreateBg;
+      }
+
+      var currentCreateFg = st.prototype.createForeground;
+      function wrapTitleCreateFg(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            if (!window.$dataSystem) {
+              var gw = (window.Graphics && window.Graphics.width) || window.innerWidth || 816;
+              var gh = (window.Graphics && window.Graphics.height) || window.innerHeight || 624;
+              var bmp = (window.Bitmap && typeof window.Bitmap === 'function') ? new window.Bitmap(gw, gh) : null;
+              this._gameTitleSprite = (window.Sprite && typeof window.Sprite === 'function') ? new window.Sprite(bmp) : {};
+              if (typeof this.addChild === 'function' && this._gameTitleSprite) {
+                this.addChild(this._gameTitleSprite);
+              }
+              return;
+            }
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Title.createForeground recovered: ' + formatError(e), '', 0);
+            try {
+              var gw2 = (window.Graphics && window.Graphics.width) || window.innerWidth || 816;
+              var gh2 = (window.Graphics && window.Graphics.height) || window.innerHeight || 624;
+              var b = (window.Bitmap && typeof window.Bitmap === 'function') ? new window.Bitmap(gw2, gh2) : null;
+              this._gameTitleSprite = this._gameTitleSprite || ((window.Sprite && typeof window.Sprite === 'function') ? new window.Sprite(b) : {});
+              if (typeof this.addChild === 'function' && this._gameTitleSprite && (!this.children || this.children.indexOf(this._gameTitleSprite) === -1)) {
+                this.addChild(this._gameTitleSprite);
+              }
+            } catch (e2) {}
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCreateFg === 'function' && !currentCreateFg.__sparkWrapped) {
+        currentCreateFg = wrapTitleCreateFg(currentCreateFg);
+      }
+      try {
+        Object.defineProperty(st.prototype, 'createForeground', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCreateFg;
+          },
+          set: function (newFn) {
+            currentCreateFg = wrapTitleCreateFg(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCreateFg) st.prototype.createForeground = currentCreateFg;
+      }
+
+      var currentCreateCmd = st.prototype.createCommandWindow;
+      function wrapTitleCreateCmd(fn) {
+        if (!fn || fn.__sparkWrapped) return fn;
+        var wrapped = function () {
+          try {
+            return fn.apply(this, arguments);
+          } catch (e) {
+            report('info', 'Scene_Title.createCommandWindow recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrapped.__sparkWrapped = true;
+        return wrapped;
+      }
+      if (typeof currentCreateCmd === 'function' && !currentCreateCmd.__sparkWrapped) {
+        currentCreateCmd = wrapTitleCreateCmd(currentCreateCmd);
+      }
+      try {
+        Object.defineProperty(st.prototype, 'createCommandWindow', {
+          configurable: true,
+          enumerable: true,
+          get: function () {
+            return currentCreateCmd;
+          },
+          set: function (newFn) {
+            currentCreateCmd = wrapTitleCreateCmd(newFn);
+          }
+        });
+      } catch (err) {
+        if (currentCreateCmd) st.prototype.createCommandWindow = currentCreateCmd;
       }
 
       var currentStart = st.prototype.start;
@@ -3693,11 +3856,9 @@
     var isRawStack = (msgStr.indexOf('@file:///') !== -1 ||
                       msgStr.indexOf('file:///') === 0 ||
                       msgStr.indexOf('@') === 0 ||
-                      msgStr.indexOf('$1@') !== -1 ||
                       (msgStr.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(msgStr)));
 
     if (isRawStack) {
-      msgStr = msgStr.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
       if (window._sparkLastError) {
         var lastErr = window._sparkLastError;
         var lastTitle = (lastErr.name || 'Error') + (lastErr.message ? ': ' + lastErr.message : '');
@@ -3733,14 +3894,11 @@
           if (typeof fn === 'function') {
             try {
               var callMsg = message;
-              if (window._sparkLastError && typeof message === 'string' && (message.indexOf('@file:///') !== -1 || message.indexOf('file:///') === 0 || message.indexOf('@') === 0 || message.indexOf('$1@') !== -1 || (message.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)))) {
+              if (window._sparkLastError && typeof message === 'string' && (message.indexOf('@file:///') !== -1 || message.indexOf('file:///') === 0 || message.indexOf('@') === 0 || (message.indexOf('.js:') !== -1 && !/^[a-zA-Z_$][a-zA-Z0-9_$]*Error:/.test(message)))) {
                 var lErr = window._sparkLastError;
                 var lTitle = (lErr.name || 'Error') + (lErr.message ? ': ' + lErr.message : '');
-                var cleanMsg = message.replace(/\$1@/g, '@').replace(/^\s*\$1/gm, '');
-                if (cleanMsg.indexOf(lTitle) !== 0) {
-                  callMsg = lTitle + '\n' + cleanMsg;
-                } else {
-                  callMsg = cleanMsg;
+                if (message.indexOf(lTitle) !== 0) {
+                  callMsg = lTitle + '\n' + message;
                 }
               }
               return fn.call(this, name, callMsg, error);
@@ -4675,11 +4833,14 @@
     var imReady = im && typeof im.isReady === 'function' ? im.isReady() : true;
 
     // Scene_Boot Force-Advance Guard:
-    // Once DataManager.isDatabaseLoaded() is true (all $data* globals populated) for > 1.5s while SceneManager._scene instanceof Scene_Boot,
+    // Once DataManager.isDatabaseLoaded() is true AND window.$dataSystem is loaded (title1Name/gameTitle defined) for > 1.5s while SceneManager._scene instanceof Scene_Boot,
     // automatically call Graphics.endLoading(), ensure Scene_Boot.prototype.onDatabaseLoaded has run,
     // and explicitly invoke SceneManager.goto(Scene_Title)
+    var isDataSystemReady = !!(window.$dataSystem && typeof window.$dataSystem === 'object' &&
+      (typeof window.$dataSystem.title1Name !== 'undefined' || typeof window.$dataSystem.gameTitle !== 'undefined'));
+    var isDbReady = (dbBool === true || allDbFilesLoaded) && isDataSystemReady;
     var isSceneBoot = (sceneName === 'Scene_Boot') || (scene && (scene instanceof (window.Scene_Boot || Object)));
-    if (isSceneBoot && (dbBool === true || allDbFilesLoaded)) {
+    if (isSceneBoot && isDbReady) {
       if (!window.__sparkBootDbLoadedStart) {
         window.__sparkBootDbLoadedStart = Date.now();
       } else if (Date.now() - window.__sparkBootDbLoadedStart > 1500) {
@@ -4707,18 +4868,18 @@
           dm._globalInfo = [];
         }
 
-        // Once DataManager.isDatabaseLoaded() is true, if SceneManager._scene is still Scene_Boot for > 1.5s,
+        // Once DataManager.isDatabaseLoaded() is true and $dataSystem is ready, if SceneManager._scene is still Scene_Boot for > 1.5s,
         // ensure SceneManager.goto(Scene_Title) is called and Graphics.endLoading() is called
         var targetScene = window.Scene_Title || null;
         var currentScene = sm && (sm._scene || sm._nextScene);
         var curName = (currentScene && currentScene.constructor && currentScene.constructor.name) || '';
         var isCurBoot = (curName === 'Scene_Boot') || (currentScene && (currentScene instanceof (window.Scene_Boot || Object)));
-        if (isCurBoot && targetScene && typeof sm.goto === 'function') {
+        if (isCurBoot && isDataSystemReady && targetScene && typeof sm.goto === 'function') {
           var isAlreadyGoingToTitle = sm._nextScene && ((sm._nextScene.constructor && sm._nextScene.constructor.name === 'Scene_Title') || (targetScene && sm._nextScene instanceof targetScene));
           if (!isAlreadyGoingToTitle) {
             if (!window.__sparkLastGotoTitleTime || (Date.now() - window.__sparkLastGotoTitleTime > 2000)) {
               window.__sparkLastGotoTitleTime = Date.now();
-              report('info', 'Watchdog: Scene_Boot stayed > 1.5s with DB loaded, force-advancing to Scene_Title', '', 0);
+              report('info', 'Watchdog: Scene_Boot stayed > 1.5s with DB & $dataSystem loaded, force-advancing to Scene_Title', '', 0);
               try {
                 if (currentScene) {
                   currentScene._fadeDuration = 0;

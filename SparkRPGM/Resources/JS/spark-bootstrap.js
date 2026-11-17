@@ -32,6 +32,10 @@
         set: function (url) {
           var self = this;
           var imgUrl = String(url || '');
+          try {
+            this.crossOrigin = null;
+            if (this.removeAttribute) this.removeAttribute('crossorigin');
+          } catch (eCross) {}
           if (imgUrl && imgUrl.indexOf('data:') !== 0) {
             pendingImages[imgUrl] = Date.now();
             var onDone = function () {
@@ -47,6 +51,34 @@
           return origImageSrcDesc.set.call(this, url);
         }
       });
+    }
+
+    var origCrossOriginDesc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'crossOrigin');
+    Object.defineProperty(HTMLImageElement.prototype, 'crossOrigin', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return null;
+      },
+      set: function (val) {
+        // Strip crossOrigin to prevent WebKit CORS failure on file://, blob:, and local URLs
+        try {
+          if (this.removeAttribute) this.removeAttribute('crossorigin');
+        } catch (e) {}
+        if (origCrossOriginDesc && origCrossOriginDesc.set) {
+          try { origCrossOriginDesc.set.call(this, null); } catch (e) {}
+        }
+      }
+    });
+
+    var origImgSetAttribute = HTMLImageElement.prototype.setAttribute;
+    if (origImgSetAttribute) {
+      HTMLImageElement.prototype.setAttribute = function (name, value) {
+        if (name && typeof name === 'string' && name.toLowerCase() === 'crossorigin') {
+          return;
+        }
+        return origImgSetAttribute.apply(this, arguments);
+      };
     }
   } catch (e) {}
 
@@ -4045,16 +4077,213 @@
     if (rawDecrypter) window.Decrypter = rawDecrypter;
   }
 
+  function getImageCandidates(rawUrl) {
+    var url = String(rawUrl || '');
+    if (!url) return [];
+    var candidates = [url];
+
+    var cleanUrl = url.split('?')[0].split('#')[0];
+    var queryOrHash = url.slice(cleanUrl.length);
+
+    if (cleanUrl.toLowerCase().endsWith('.png')) {
+      candidates.push(cleanUrl + '_' + queryOrHash);
+      candidates.push(cleanUrl.slice(0, -4) + '.rpgmvp' + queryOrHash);
+    } else if (cleanUrl.toLowerCase().endsWith('.png_')) {
+      candidates.push(cleanUrl.slice(0, -1) + queryOrHash);
+      candidates.push(cleanUrl.slice(0, -5) + '.rpgmvp' + queryOrHash);
+    } else if (cleanUrl.toLowerCase().endsWith('.rpgmvp')) {
+      candidates.push(cleanUrl.slice(0, -7) + '.png' + queryOrHash);
+      candidates.push(cleanUrl.slice(0, -7) + '.png_' + queryOrHash);
+    } else if (cleanUrl.toLowerCase().endsWith('.jpg') || cleanUrl.toLowerCase().endsWith('.jpeg')) {
+      candidates.push(cleanUrl + '_' + queryOrHash);
+    } else if (cleanUrl.indexOf('.') === -1 || cleanUrl.lastIndexOf('/') > cleanUrl.lastIndexOf('.')) {
+      candidates.push(url + '.png');
+      candidates.push(url + '.png_');
+      candidates.push(url + '.rpgmvp');
+    }
+
+    var unique = [];
+    for (var i = 0; i < candidates.length; i++) {
+      if (unique.indexOf(candidates[i]) === -1) {
+        unique.push(candidates[i]);
+      }
+    }
+    return unique;
+  }
+
+  function loadBitmapFallback(bitmap, origOnError, originalArgs) {
+    var rawUrl = bitmap._url;
+    if (!rawUrl || bitmap._sparkLoadingFallback || bitmap._sparkFallbackSuccess) {
+      if (typeof origOnError === 'function') {
+        return origOnError.apply(bitmap, originalArgs);
+      }
+      return;
+    }
+    bitmap._sparkLoadingFallback = true;
+
+    var candidates = getImageCandidates(rawUrl);
+    var currentIndex = 0;
+
+    function tryNextCandidate() {
+      if (currentIndex >= candidates.length) {
+        bitmap._sparkLoadingFallback = false;
+        bitmap._loadingState = 'error';
+        if (!window.__sparkFirstFailedBitmapUrl) {
+          window.__sparkFirstFailedBitmapUrl = rawUrl;
+        }
+        report('info', 'Bitmap fallback failed all candidates for: ' + rawUrl, rawUrl, 0);
+        if (typeof origOnError === 'function') {
+          return origOnError.apply(bitmap, originalArgs);
+        }
+        return;
+      }
+
+      var targetUrl = candidates[currentIndex++];
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', targetUrl, true);
+      xhr.responseType = 'arraybuffer';
+
+      xhr.onload = function () {
+        if (xhr.status < 400 && xhr.response && xhr.response.byteLength > 0) {
+          var buffer = xhr.response;
+          try {
+            var isPlain = false;
+            if (buffer.byteLength >= 4) {
+              var h = new Uint8Array(buffer, 0, 4);
+              if ((h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4E && h[3] === 0x47) ||
+                  (h[0] === 0xFF && h[1] === 0xD8 && h[2] === 0xFF) ||
+                  (h[0] === 0x47 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x38) ||
+                  (h[0] === 0x52 && h[1] === 0x49 && h[2] === 0x46 && h[3] === 0x46)) {
+                isPlain = true;
+              }
+            }
+
+            if (!isPlain && window.Decrypter) {
+              if (window.$dataSystem && window.$dataSystem.encryptionKey && !window.Decrypter._encryptionKey) {
+                window.Decrypter._encryptionKey = window.$dataSystem.encryptionKey;
+              }
+              if (typeof window.Decrypter.decryptArrayBuffer === 'function') {
+                try {
+                  var decrypted = window.Decrypter.decryptArrayBuffer(buffer);
+                  if (decrypted && decrypted.byteLength > 0) {
+                    buffer = decrypted;
+                  }
+                } catch (eDec) {
+                  report('info', 'Fallback decrypt error: ' + eDec.message, targetUrl, 0);
+                }
+              }
+            }
+
+            var mime = 'image/png';
+            if (buffer.byteLength >= 4) {
+              var header = new Uint8Array(buffer, 0, 4);
+              if (header[0] === 0xFF && header[1] === 0xD8) mime = 'image/jpeg';
+              else if (header[0] === 0x47 && header[1] === 0x49) mime = 'image/gif';
+              else if (header[0] === 0x52 && header[1] === 0x49) mime = 'image/webp';
+            }
+
+            var blob = new Blob([buffer], { type: mime });
+            var blobUrl = (window.URL || window.webkitURL).createObjectURL(blob);
+
+            if (!bitmap._image) {
+              bitmap._image = new Image();
+            }
+            var img = bitmap._image;
+            img.crossOrigin = null;
+            if (img.removeAttribute) {
+              try { img.removeAttribute('crossorigin'); } catch (e) {}
+            }
+
+            var onBlobSuccess = function () {
+              img.removeEventListener('load', onBlobSuccess);
+              img.removeEventListener('error', onBlobFailed);
+              bitmap._sparkLoadingFallback = false;
+              bitmap._sparkFallbackSuccess = true;
+              bitmap._loadingState = 'loaded';
+
+              if (bitmap._baseTexture) {
+                try { bitmap._baseTexture.update(); } catch (e) {}
+              }
+              if (typeof bitmap._callLoadListeners === 'function') {
+                bitmap._callLoadListeners();
+              } else if (typeof bitmap._onLoad === 'function') {
+                bitmap._onLoad();
+              }
+            };
+
+            var onBlobFailed = function () {
+              img.removeEventListener('load', onBlobSuccess);
+              img.removeEventListener('error', onBlobFailed);
+              tryNextCandidate();
+            };
+
+            img.addEventListener('load', onBlobSuccess, false);
+            img.addEventListener('error', onBlobFailed, false);
+            img.src = blobUrl;
+            if (img.width > 0) {
+              onBlobSuccess();
+            }
+          } catch (eProc) {
+            tryNextCandidate();
+          }
+        } else {
+          tryNextCandidate();
+        }
+      };
+
+      xhr.onerror = function () {
+        tryNextCandidate();
+      };
+
+      try {
+        xhr.send();
+      } catch (eSend) {
+        tryNextCandidate();
+      }
+    }
+
+    tryNextCandidate();
+  }
+
   function patchBitmapPrototype(bmpProto) {
     if (!bmpProto || bmpProto.__sparkPatched) return;
     bmpProto.__sparkPatched = true;
 
+    var origStartLoading = bmpProto._startLoading;
+    if (typeof origStartLoading === 'function') {
+      bmpProto._startLoading = function () {
+        var res = origStartLoading.apply(this, arguments);
+        if (this._image) {
+          try {
+            this._image.crossOrigin = null;
+            if (this._image.removeAttribute) {
+              this._image.removeAttribute('crossorigin');
+            }
+          } catch (e) {}
+        }
+        return res;
+      };
+    }
+
     var origOnError = bmpProto._onError;
     bmpProto._onError = function () {
+      var self = this;
+      var args = arguments;
       var url = this._url || 'unknown';
+
+      // If fallback not attempted yet and we have a URL, attempt XHR + Blob fallback
+      if (!this._sparkFallbackAttempted && this._url) {
+        this._sparkFallbackAttempted = true;
+        loadBitmapFallback(this, origOnError, args);
+        return;
+      }
+
+      if (!window.__sparkFirstFailedBitmapUrl) {
+        window.__sparkFirstFailedBitmapUrl = url;
+      }
       report('info', 'Bitmap load error: ' + url, url, 0);
       if (typeof origOnError === 'function') {
-        return origOnError.apply(this, arguments);
+        return origOnError.apply(this, args);
       }
     };
   }
@@ -5037,6 +5266,7 @@
     var total = 0;
     var loaded = 0;
     var errors = 0;
+    var firstErrorUrl = '';
     if (im && im._cache) {
       var cache = im._cache;
       for (var k in cache) {
@@ -5051,14 +5281,19 @@
               loaded++;
             } else if (bmp.isError && bmp.isError()) {
               errors++;
+              if (!firstErrorUrl) firstErrorUrl = bmp._url || k;
             } else if (bmp._loadingState === 'error') {
               errors++;
+              if (!firstErrorUrl) firstErrorUrl = bmp._url || k;
             }
           }
         }
       }
     }
-    return { total: total, loaded: loaded, errors: errors };
+    if (!firstErrorUrl && window.__sparkFirstFailedBitmapUrl) {
+      firstErrorUrl = window.__sparkFirstFailedBitmapUrl;
+    }
+    return { total: total, loaded: loaded, errors: errors, firstErrorUrl: firstErrorUrl };
   }
 
   function getSceneTelemetryString() {
@@ -5104,6 +5339,19 @@
       ' | enc=' + encStr;
     if (bStats.errors > 0) {
       str += ' | err=' + bStats.errors;
+      if (bStats.firstErrorUrl) {
+        var displayUrl = bStats.firstErrorUrl;
+        var imgIdx = displayUrl.indexOf('img/');
+        if (imgIdx !== -1) {
+          displayUrl = displayUrl.slice(imgIdx);
+        } else {
+          var lastSlash = displayUrl.lastIndexOf('/');
+          if (lastSlash !== -1) {
+            displayUrl = displayUrl.slice(lastSlash + 1);
+          }
+        }
+        str += ' | errUrl=' + displayUrl;
+      }
     }
     return str;
   }

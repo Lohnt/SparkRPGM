@@ -99,6 +99,10 @@
   }
 
   window.__sparkReportError = report;
+  function reportDiagnostic(kind, message) {
+    report(kind || 'error', message, '', 0);
+  }
+  window.__sparkReportDiagnostic = reportDiagnostic;
   window.__sparkBrowserMode = true;
   window._sparkLastError = null;
 
@@ -1646,6 +1650,10 @@
         if (currentCCF) sb.prototype.createColorFilter = currentCCF;
       }
 
+      if (typeof sb.prototype.fadeIn !== 'function' && typeof sb.prototype.startFadeIn === 'function') {
+        sb.prototype.fadeIn = sb.prototype.startFadeIn;
+      }
+
       var currentCreate = sb.prototype.create;
       function wrapCreate(fn) {
         if (!fn || fn.__sparkWrapped) return fn;
@@ -1655,7 +1663,8 @@
           } catch (e) {
             var isTitle = this && ((this.constructor && this.constructor.name === 'Scene_Title') || (window.Scene_Title && this instanceof window.Scene_Title));
             if (isTitle) {
-              report('engine.error', 'Scene_Title.create failed: ' + formatError(e), '', 0);
+              reportDiagnostic('error', 'Scene_Title.create failed: ' + formatError(e));
+              throw e;
             } else {
               report('info', 'Scene_Base.create recovered: ' + formatError(e), '', 0);
             }
@@ -1691,12 +1700,13 @@
           } catch (e) {
             var isTitle = this && ((this.constructor && this.constructor.name === 'Scene_Title') || (window.Scene_Title && this instanceof window.Scene_Title));
             if (isTitle) {
-              report('engine.error', 'Scene_Title.start failed: ' + formatError(e), '', 0);
+              reportDiagnostic('error', 'Scene_Title.start failed: ' + formatError(e));
+              throw e;
             } else {
               report('info', 'Scene_Base.start recovered: ' + formatError(e), '', 0);
+              this._started = true;
+              this._active = true;
             }
-            this._started = true;
-            this._active = true;
           }
         };
         wrapped.__sparkWrapped = true;
@@ -1940,6 +1950,10 @@
   function patchSceneTitle(st) {
     if (!st || !st.prototype) return;
     try {
+      if (typeof st.prototype.fadeIn !== 'function' && typeof st.prototype.startFadeIn === 'function') {
+        st.prototype.fadeIn = st.prototype.startFadeIn;
+      }
+
       var currentCreate = st.prototype.create;
       function wrapTitleCreate(fn) {
         if (!fn || fn.__sparkWrapped) return fn;
@@ -1947,7 +1961,8 @@
           try {
             return fn.apply(this, arguments);
           } catch (e) {
-            report('engine.error', 'Scene_Title.create failed: ' + formatError(e), '', 0);
+            reportDiagnostic('error', 'Scene_Title.create failed: ' + formatError(e));
+            throw e;
           }
         };
         wrapped.__sparkWrapped = true;
@@ -1975,12 +1990,40 @@
       function wrapTitleStart(fn) {
         if (!fn || fn.__sparkWrapped) return fn;
         var wrapped = function () {
+          var self = this;
           try {
-            return fn.apply(this, arguments);
+            var res = fn.apply(this, arguments);
+            if (typeof this.fadeIn === 'function' && typeof this.startFadeIn !== 'function') {
+              try { this.fadeIn(this.fadeSpeed ? this.fadeSpeed() : 30, false); } catch (eFi) {}
+            }
+            // Ensure Scene_Title clears fadeOpacity after 1.0s so a stuck fade filter cannot keep the screen black
+            setTimeout(function () {
+              try {
+                if (self && typeof self._fadeOpacity === 'number' && self._fadeOpacity > 0) {
+                  self._fadeOpacity = 0;
+                  self._fadeDuration = 0;
+                  self._fadeSign = 0;
+                  if (typeof self.updateColorFilter === 'function') {
+                    self.updateColorFilter();
+                  }
+                  if (self._colorFilter && typeof self._colorFilter.setBlendColor === 'function') {
+                    self._colorFilter.setBlendColor([0, 0, 0, 0]);
+                  }
+                }
+              } catch (eF) {}
+            }, 1000);
+            return res;
           } catch (e) {
-            report('engine.error', 'Scene_Title.start failed: ' + formatError(e), '', 0);
+            reportDiagnostic('error', 'Scene_Title.start failed: ' + formatError(e));
             this._started = true;
             this._active = true;
+            this._fadeOpacity = 0;
+            this._fadeDuration = 0;
+            this._fadeSign = 0;
+            try {
+              if (typeof this.updateColorFilter === 'function') this.updateColorFilter();
+            } catch (e2) {}
+            throw e;
           }
         };
         wrapped.__sparkWrapped = true;
@@ -3657,17 +3700,17 @@
       var canvas = document.getElementById('gameCanvas') || (window.Graphics && window.Graphics._canvas);
       if (canvas) {
         if (canvas.style) {
-          if (canvas.style.display === 'none') canvas.style.display = 'block';
-          if (canvas.style.visibility === 'hidden') canvas.style.visibility = 'visible';
-          if (canvas.style.opacity === '0') canvas.style.opacity = '1';
+          canvas.style.display = 'block';
+          canvas.style.visibility = 'visible';
+          canvas.style.opacity = '1';
+          if (canvas.style.width === '0px' || canvas.style.width === '0') canvas.style.width = '100%';
+          if (canvas.style.height === '0px' || canvas.style.height === '0') canvas.style.height = '100%';
         }
         var gfx = window.Graphics;
-        if (gfx) {
-          var w = gfx._width || gfx.width || 816;
-          var h = gfx._height || gfx.height || 624;
-          if ((!canvas.width || canvas.width === 0) && w > 0) canvas.width = w;
-          if ((!canvas.height || canvas.height === 0) && h > 0) canvas.height = h;
-        }
+        var w = (gfx && (gfx._width || gfx.width)) || window.innerWidth || 816;
+        var h = (gfx && (gfx._height || gfx.height)) || window.innerHeight || 624;
+        if (!canvas.width || canvas.width <= 0) canvas.width = w;
+        if (!canvas.height || canvas.height <= 0) canvas.height = h;
       }
     } catch (e) {}
   }
@@ -3857,6 +3900,18 @@
 
       hookSceneManagerErrors(sm);
 
+      // Ensure SceneManager.update tracks ticks and keeps game loop going
+      if (typeof sm.update === 'function' && !sm.update.__sparkWrapped) {
+        var origUpdate = sm.update;
+        var wrappedUpdate = function () {
+          sm._sparkLastTick = Date.now();
+          ensureCanvasVisible();
+          return origUpdate.apply(this, arguments);
+        };
+        wrappedUpdate.__sparkWrapped = true;
+        sm.update = wrappedUpdate;
+      }
+
       // 4. SceneManager.goto
       function wrapGoto(fn) {
         if (!fn || fn.__sparkWrapped) return fn;
@@ -3868,7 +3923,13 @@
           try {
             return fn.apply(this, arguments);
           } catch (e) {
-            report('info', 'SceneManager.goto recovered: ' + formatError(e), '', 0);
+            var isTitle = sceneClass && (sceneClass.name === 'Scene_Title' || (window.Scene_Title && sceneClass === window.Scene_Title));
+            if (isTitle) {
+              reportDiagnostic('error', 'SceneManager.goto(Scene_Title) failed: ' + formatError(e));
+              throw e;
+            } else {
+              report('info', 'SceneManager.goto recovered: ' + formatError(e), '', 0);
+            }
             try {
               if (typeof sceneClass === 'function' && !this._nextScene) {
                 this._nextScene = Object.create(sceneClass.prototype);
@@ -3919,7 +3980,8 @@
             var currentScene = this._scene || this._nextScene;
             var isTitle = currentScene && ((currentScene.constructor && currentScene.constructor.name === 'Scene_Title') || (window.Scene_Title && currentScene instanceof window.Scene_Title));
             if (isTitle) {
-              report('engine.error', 'SceneManager.changeScene failed: ' + formatError(e), '', 0);
+              reportDiagnostic('error', 'SceneManager.changeScene(Scene_Title) failed: ' + formatError(e));
+              throw e;
             } else {
               report('info', 'SceneManager.changeScene recovered: ' + formatError(e), '', 0);
             }
@@ -4501,7 +4563,7 @@
 
     var now = Date.now();
 
-    // Unstick fadeOpacity if SceneManager._scene is Scene_Title (or Scene_Map) and opacity remains > 0 for > 1.5s without decreasing
+    // Unstick fadeOpacity if SceneManager._scene is Scene_Title (or Scene_Map) and opacity remains > 0 for > 1.0s without decreasing
     var isTitleOrMap = (sceneName === 'Scene_Title' || sceneName === 'Scene_Map') ||
       (scene && ((window.Scene_Title && scene instanceof window.Scene_Title) || (window.Scene_Map && scene instanceof window.Scene_Map)));
 
@@ -4509,7 +4571,7 @@
       if (typeof scene._sparkLastFadeOpacity !== 'number' || scene._fadeOpacity < scene._sparkLastFadeOpacity) {
         scene._sparkLastFadeOpacity = scene._fadeOpacity;
         scene._sparkFadeStuckTime = now;
-      } else if (now - (scene._sparkFadeStuckTime || now) > 1500) {
+      } else if (now - (scene._sparkFadeStuckTime || now) > 1000) {
         report('info', 'Watchdog unsticking fadeOpacity on ' + sceneName + ' (was ' + scene._fadeOpacity + ')', '', 0);
         scene._fadeOpacity = 0;
         scene._fadeDuration = 0;
@@ -4532,13 +4594,46 @@
       scene._sparkLastFadeOpacity = null;
     }
 
+    // Game loop watchdog:
+    // Ensure SceneManager.requestUpdate() / Graphics.startGameLoop() is actually ticking every frame
+    if (sm && !sm._stopped) {
+      var lastTick = sm._sparkLastTick || 0;
+      if (now - lastTick > 250) {
+        sm._sparkLastTick = now;
+        if (typeof sm.requestUpdate === 'function') {
+          try { sm.requestUpdate(); } catch (eRu) {}
+        }
+      }
+    }
+
+    if (gfx) {
+      if (typeof gfx.startGameLoop === 'function' && !gfx._started) {
+        try { gfx.startGameLoop(); } catch (eSgl) {}
+      }
+      if (gfx._app && gfx._app.ticker && !gfx._app.ticker.started) {
+        try { gfx._app.ticker.start(); } catch (eTkr) {}
+      }
+    }
+    if (window.PIXI && window.PIXI.Ticker && window.PIXI.Ticker.shared && !window.PIXI.Ticker.shared.started) {
+      try { window.PIXI.Ticker.shared.start(); } catch (ePt) {}
+    }
+
     // Live Scene Telemetry Banner:
-    // After > 2.5s from launch, if SceneManager._scene is still Scene_Boot OR Scene_Title with 0 children (scene.children.length === 0) OR scene._fadeOpacity === 255:
+    // After > 2.5s from launch, if SceneManager._scene is still Scene_Boot OR Scene_Title with 0 visible children OR scene._fadeOpacity === 255:
     var elapsedSinceLaunch = now - sparkBootstrapLaunchTime;
     var ctorName = (scene && scene.constructor && scene.constructor.name) || sceneName || 'None';
     var isStarted = !!(scene && scene._started);
     var isActive = !!(scene && scene.isActive && scene.isActive());
     var childCount = (scene && scene.children && typeof scene.children.length === 'number') ? scene.children.length : 0;
+    var visibleCount = 0;
+    if (scene && scene.children && Array.isArray(scene.children)) {
+      for (var ci = 0; ci < scene.children.length; ci++) {
+        var c = scene.children[ci];
+        if (c && c.visible !== false && c.renderable !== false && c.worldAlpha !== 0 && c.alpha !== 0) {
+          visibleCount++;
+        }
+      }
+    }
     var fadeVal = (scene && typeof scene._fadeOpacity !== 'undefined') ? scene._fadeOpacity : 'n/a';
 
     var canvasEl = (window.Graphics && window.Graphics._canvas) || document.getElementById('gameCanvas') || document.querySelector('canvas');
@@ -4548,14 +4643,14 @@
     var isTitle = (ctorName === 'Scene_Title') || (window.Scene_Title && scene instanceof window.Scene_Title);
     var isBoot = (ctorName === 'Scene_Boot') || (window.Scene_Boot && scene instanceof window.Scene_Boot);
 
-    var shouldReportTelemetry = isBoot || (isTitle && (childCount === 0 || fadeVal === 255));
+    var shouldReportTelemetry = isBoot || (isTitle && (childCount === 0 || visibleCount === 0 || fadeVal === 255));
     if (elapsedSinceLaunch > 2500 && shouldReportTelemetry) {
-      var diagKey = ctorName + '|' + isStarted + '|' + isActive + '|' + childCount + '|' + fadeVal + '|' + cw + 'x' + ch;
+      var diagKey = ctorName + '|' + isStarted + '|' + isActive + '|' + childCount + '|' + visibleCount + '|' + fadeVal + '|' + cw + 'x' + ch;
       if (!window.__sparkLastReportedSceneDiag || (window.__sparkLastReportedSceneDiag !== diagKey && (now - (window.__sparkLastReportedSceneDiagTime || 0) > 3000))) {
         window.__sparkLastReportedSceneDiag = diagKey;
         window.__sparkLastReportedSceneDiagTime = now;
         var diagBanner = 'Scene: ' + ctorName + ' | started=' + isStarted + ' | active=' + isActive + ' | children=' + childCount + ' | fade=' + fadeVal + ' | canvas=' + cw + 'x' + ch;
-        report('info', diagBanner, '', 0);
+        reportDiagnostic('diagnostic', diagBanner);
       }
     }
 

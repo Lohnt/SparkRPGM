@@ -35,8 +35,7 @@ struct LibraryView: View {
     @State private var coverTarget: Game?
     @State private var showCoverSourceDialog = false
 
-    @State private var deleteTarget: Game?
-    @State private var showDeleteDialog = false
+    @State private var gameToDelete: Game?
 
     @State private var alert: LibraryAlert?
 
@@ -58,6 +57,20 @@ struct LibraryView: View {
                     .padding(.bottom, 110)
                 }
                 .background(Color.clear)
+                .alert(item: $gameToDelete) { game in
+                    Alert(
+                        title: Text("Delete \(game.title)?"),
+                        message: Text("The game folder and Documents/save/\(game.folderName) are removed. Zips in backups/ are kept."),
+                        primaryButton: .destructive(Text("Delete Game and Saves")) {
+                            do {
+                                try store.delete(game)
+                            } catch {
+                                presentError(error.localizedDescription)
+                            }
+                        },
+                        secondaryButton: .cancel()
+                    )
+                }
 
                 importBanner
             }
@@ -111,24 +124,6 @@ struct LibraryView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Pick an image to represent this game in your library.")
-            }
-            .confirmationDialog(
-                deleteTarget.map { "Delete \($0.title)?" } ?? "Delete game?",
-                isPresented: $showDeleteDialog,
-                titleVisibility: .visible
-            ) {
-                Button("Delete Game and Saves", role: .destructive) {
-                    if let target = deleteTarget {
-                        do {
-                            try store.delete(target)
-                        } catch {
-                            presentError(error.localizedDescription)
-                        }
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The game folder and Documents/save/\(deleteTarget?.folderName ?? "") are removed. Zips in backups/ are kept.")
             }
             .fullScreenCover(item: $selectedGame) { game in
                 GamePlayerView(game: game)
@@ -361,8 +356,9 @@ struct LibraryView: View {
                     onBackup: { backup(game) },
                     onHide: { hideGame(game) },
                     onDelete: {
-                        deleteTarget = game
-                        showDeleteDialog = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            gameToDelete = game
+                        }
                     }
                 )
                 .frame(maxWidth: .infinity)
@@ -389,8 +385,9 @@ struct LibraryView: View {
                     onBackup: { backup(game) },
                     onHide: { hideGame(game) },
                     onDelete: {
-                        deleteTarget = game
-                        showDeleteDialog = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            gameToDelete = game
+                        }
                     }
                 )
             }

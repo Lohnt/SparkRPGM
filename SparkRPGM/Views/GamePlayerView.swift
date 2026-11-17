@@ -160,9 +160,9 @@ struct GamePlayerView: View {
                     .zIndex(8)
             }
 
-            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, !session.isLoading, !isFatalErrorDiagnostic(diagnostic) {
+            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, (!session.isLoading || diagnostic.hasPrefix("Scene:")), !isFatalErrorDiagnostic(diagnostic) {
                 errorBanner(diagnostic)
-                    .zIndex(15)
+                    .zIndex(25)
             }
 
             if !gameFailed {
@@ -208,11 +208,15 @@ struct GamePlayerView: View {
     }
 
     private func isFatalErrorDiagnostic(_ message: String) -> Bool {
-        let lower = message.lowercased()
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("Scene:") || trimmed.lowercased().hasPrefix("scene:") || trimmed.lowercased().contains("scene:") {
+            return false
+        }
+        let lower = trimmed.lowercased()
         if lower.contains("stall") || lower.contains("stalled") {
             return false
         }
-        if lower.contains("recovered:") || lower.contains("warning:") || lower.contains("timed out (1000ms); initialized _globalinfo = []") || lower.contains("scene:") || lower.contains("fade=") || lower.contains("children=") || lower.contains("canvas=") {
+        if lower.contains("recovered:") || lower.contains("warning:") || lower.contains("timed out (1000ms); initialized _globalinfo = []") || lower.contains("fade=") || lower.contains("children=") || lower.contains("canvas=") {
             return false
         }
         if message == GameSession.slowBootNotice || message == GameSession.missingEngineNotice {

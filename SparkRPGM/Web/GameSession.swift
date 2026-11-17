@@ -29,6 +29,7 @@ final class GameSession: NSObject, ObservableObject {
     @Published private(set) var bootStage: String?
     /// Last JavaScript exception or failed script reported by the bootstrap.
     @Published private(set) var bootDiagnostic: String?
+    var diagnosticBanner: String? { bootDiagnostic }
     /// Files the scheme handler could not resolve, newest last (capped).
     @Published private(set) var missingResources: [String] = []
     /// Set by the watchdog when the game has not signalled readiness in time.
@@ -402,10 +403,15 @@ final class GameSession: NSObject, ObservableObject {
     func handle(message: WKScriptMessage) {
         switch message.name {
         case "sparkLog":
-            if let text = message.body as? String {
-                Log.web(text)
-            } else {
-                Log.web(String(describing: message.body))
+            let text = (message.body as? String) ?? String(describing: message.body)
+            Log.web(text)
+            if text.contains("Scene:") {
+                if text.contains("Scene_Map") {
+                    bootDiagnostic = nil
+                } else {
+                    bootDiagnostic = text
+                    isDiagnosticDismissed = false
+                }
             }
 
         case "sparkReady", "gameReady":
@@ -472,6 +478,16 @@ final class GameSession: NSObject, ObservableObject {
         let message = payload["message"] as? String ?? "Unknown error"
         let source = payload["source"] as? String ?? ""
         let line = payload["line"] as? Int ?? 0
+
+        if message.contains("Scene:") {
+            if message.contains("Scene_Map") {
+                bootDiagnostic = nil
+            } else {
+                bootDiagnostic = message
+                isDiagnosticDismissed = false
+            }
+            return
+        }
 
         if kind == "info" {
             Log.web("boot: \(message)")

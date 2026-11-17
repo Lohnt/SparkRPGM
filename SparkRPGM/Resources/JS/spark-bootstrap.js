@@ -996,9 +996,37 @@
         if (!fn) return fn;
         var wrapped = function () {
           try {
-            return fn.apply(this, arguments);
+            if (window.SoundManager) {
+              if (typeof window.SoundManager.preloadImportantSounds !== 'function') {
+                window.SoundManager.preloadImportantSounds = function () {};
+              } else {
+                try { window.SoundManager.preloadImportantSounds(); } catch (eSnd) {}
+              }
+            }
+            var res = fn.apply(this, arguments);
+            if (typeof this.checkPlayerLocation === 'function') {
+              try { this.checkPlayerLocation(); } catch (eCpl) {}
+            }
+            if (window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
+              var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
+              if (targetScene && typeof window.SceneManager.goto === 'function') {
+                try { window.SceneManager.goto(targetScene); } catch (eGo) {}
+              }
+            }
+            return res;
           } catch (e) {
             report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
+            try {
+              if (typeof this.checkPlayerLocation === 'function') {
+                try { this.checkPlayerLocation(); } catch (eCpl2) {}
+              }
+              if (window.SceneManager) {
+                var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
+                if (target && typeof window.SceneManager.goto === 'function') {
+                  window.SceneManager.goto(target);
+                }
+              }
+            } catch (e2) {}
           }
         };
         wrapped.__sparkWrapped = true;
@@ -1202,8 +1230,18 @@
         var origStart = sb.prototype.start;
         var wrappedStart = function () {
           try {
+            if (window.SoundManager) {
+              if (typeof window.SoundManager.preloadImportantSounds !== 'function') {
+                window.SoundManager.preloadImportantSounds = function () {};
+              } else {
+                try { window.SoundManager.preloadImportantSounds(); } catch (eSnd) {}
+              }
+            }
             var res = origStart.apply(this, arguments);
-            if (window.SceneManager && window.SceneManager._scene === this && !window.SceneManager._nextScene) {
+            if (typeof this.checkPlayerLocation === 'function') {
+              try { this.checkPlayerLocation(); } catch (eCpl) {}
+            }
+            if (window.SceneManager && (window.SceneManager._scene === this || !window.SceneManager._nextScene)) {
               var targetScene = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
               if (targetScene && typeof window.SceneManager.goto === 'function') {
                 try { window.SceneManager.goto(targetScene); } catch (eGo) {}
@@ -1213,6 +1251,9 @@
           } catch (e) {
             report('info', 'Scene_Boot.start recovered: ' + formatError(e), '', 0);
             try {
+              if (typeof this.checkPlayerLocation === 'function') {
+                try { this.checkPlayerLocation(); } catch (eCpl2) {}
+              }
               if (window.SceneManager) {
                 var target = (window.Scene_Splash && typeof window.Scene_Splash === 'function') ? window.Scene_Splash : (window.Scene_Title || null);
                 if (target && typeof window.SceneManager.goto === 'function') {
@@ -1507,6 +1548,42 @@
       set: function (val) {
         rawColorManager = val;
         patchColorManager(val);
+      }
+    });
+  } catch (e) {}
+
+  function patchSoundManager(sm) {
+    if (!sm) return;
+    try {
+      if (typeof sm.preloadImportantSounds !== 'function') {
+        sm.preloadImportantSounds = function () {};
+      } else if (!sm.preloadImportantSounds.__sparkWrapped) {
+        var origPreload = sm.preloadImportantSounds;
+        var wrappedPreload = function () {
+          try {
+            return origPreload.apply(this, arguments);
+          } catch (e) {
+            report('info', 'SoundManager.preloadImportantSounds recovered: ' + formatError(e), '', 0);
+          }
+        };
+        wrappedPreload.__sparkWrapped = true;
+        sm.preloadImportantSounds = wrappedPreload;
+      }
+    } catch (e) {}
+  }
+
+  var rawSoundManager = window.SoundManager;
+  if (rawSoundManager) patchSoundManager(rawSoundManager);
+  try {
+    Object.defineProperty(window, 'SoundManager', {
+      configurable: true,
+      enumerable: true,
+      get: function () {
+        return rawSoundManager;
+      },
+      set: function (val) {
+        rawSoundManager = val;
+        patchSoundManager(val);
       }
     });
   } catch (e) {}
@@ -3566,6 +3643,9 @@
     if (window.ColorManager && typeof patchColorManager === 'function') {
       patchColorManager(window.ColorManager);
     }
+    if (window.SoundManager && typeof patchSoundManager === 'function') {
+      patchSoundManager(window.SoundManager);
+    }
     if (window.Scene_Base && typeof patchSceneBase === 'function') {
       patchSceneBase(window.Scene_Base);
     }
@@ -4265,6 +4345,7 @@
     }
     if (window.ImageManager && typeof patchImageManager === 'function') patchImageManager(window.ImageManager);
     if (window.ColorManager && typeof patchColorManager === 'function') patchColorManager(window.ColorManager);
+    if (window.SoundManager && typeof patchSoundManager === 'function') patchSoundManager(window.SoundManager);
     if (window.Scene_Base && typeof patchSceneBase === 'function') {
       patchSceneBase(window.Scene_Base);
     }
@@ -4411,11 +4492,120 @@
     } catch (e) {}
   }
 
+  function checkAndDriveGraphicsRender() {
+    var gfx = window.Graphics;
+    var sm = window.SceneManager;
+    if (!gfx) return;
+
+    try {
+      var renderer = gfx._renderer || (gfx._app && gfx._app.renderer);
+      if (renderer) {
+        var rw = renderer.width || 0;
+        var rh = renderer.height || 0;
+        if (rw === 0 || rh === 0) {
+          var targetW = window.innerWidth || 816;
+          var targetH = window.innerHeight || 624;
+          if (typeof renderer.resize === 'function') {
+            renderer.resize(targetW, targetH);
+          }
+        }
+      }
+
+      var currentFrame = (typeof gfx.frameCount === 'number') ? gfx.frameCount : 0;
+      var now = Date.now();
+      if (typeof window.__sparkLastFrameCount !== 'number') {
+        window.__sparkLastFrameCount = currentFrame;
+        window.__sparkLastFrameCountChangeTime = now;
+      } else if (window.__sparkLastFrameCount !== currentFrame) {
+        window.__sparkLastFrameCount = currentFrame;
+        window.__sparkLastFrameCountChangeTime = now;
+      } else {
+        var stuckDuration = now - (window.__sparkLastFrameCountChangeTime || now);
+        if (stuckDuration > 300 && sm && !sm._stopped) {
+          if (window.requestAnimationFrame) {
+            window.requestAnimationFrame(function () {
+              try {
+                if (sm && typeof sm.updateMain === 'function') {
+                  sm.updateMain();
+                } else if (gfx && typeof gfx._onTick === 'function') {
+                  gfx._onTick(performance.now ? performance.now() : Date.now());
+                }
+              } catch (eDrive) {}
+            });
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  function getSceneTelemetryString() {
+    var sm = window.SceneManager;
+    var gfx = window.Graphics;
+    var scene = (sm && (sm._scene || sm._nextScene)) || null;
+    var ctorName = (scene && scene.constructor && scene.constructor.name) || (scene ? 'UnknownScene' : 'None');
+    var isStarted = !!(scene && scene._started);
+    var isActive = !!(scene && scene.isActive && scene.isActive());
+    var childCount = (scene && scene.children && typeof scene.children.length === 'number') ? scene.children.length : 0;
+    var fadeVal = (scene && typeof scene._fadeOpacity !== 'undefined') ? scene._fadeOpacity : 'n/a';
+
+    var canvasEl = (gfx && gfx._canvas) || document.getElementById('gameCanvas') || document.querySelector('canvas');
+    var cw = canvasEl ? (canvasEl.width || canvasEl.clientWidth || 0) : 0;
+    var ch = canvasEl ? (canvasEl.height || canvasEl.clientHeight || 0) : 0;
+
+    var rendType = 'none';
+    var renderer = (gfx && (gfx._renderer || (gfx._app && gfx._app.renderer))) || null;
+    if (renderer) {
+      if (renderer.type === 1) {
+        rendType = 'WebGL';
+      } else if (renderer.type === 2) {
+        rendType = 'Canvas';
+      } else if (renderer.constructor && renderer.constructor.name) {
+        rendType = renderer.constructor.name;
+      } else {
+        rendType = String(renderer.type || 'WebGL');
+      }
+    }
+
+    return 'Scene: ' + ctorName +
+      ' | started=' + isStarted +
+      ' | active=' + isActive +
+      ' | children=' + childCount +
+      ' | fade=' + fadeVal +
+      ' | canvas=' + cw + 'x' + ch +
+      ' | renderer=' + rendType;
+  }
+
+  var sceneHeartbeatTimer = null;
+  function emitSceneHeartbeat() {
+    try {
+      checkAndDriveGraphicsRender();
+
+      var telemetry = getSceneTelemetryString();
+      post('sparkLog', telemetry);
+      post('sparkError', {
+        kind: 'diagnostic',
+        message: telemetry,
+        source: '',
+        line: 0
+      });
+
+      var sm = window.SceneManager;
+      var scene = (sm && (sm._scene || sm._nextScene)) || null;
+      var ctorName = (scene && scene.constructor && scene.constructor.name) || '';
+      var isMap = (ctorName === 'Scene_Map') || (scene && window.Scene_Map && (scene instanceof window.Scene_Map));
+      if (isMap && sceneHeartbeatTimer) {
+        clearInterval(sceneHeartbeatTimer);
+        sceneHeartbeatTimer = null;
+      }
+    } catch (e) {}
+  }
+
   function checkReadinessWatchdog() {
     var sm = window.SceneManager;
     var gfx = window.Graphics;
     if (!sm && !gfx) return;
 
+    checkAndDriveGraphicsRender();
     syncLoadingSpinner();
     ensureCanvasVisible();
 
@@ -4649,8 +4839,9 @@
       if (!window.__sparkLastReportedSceneDiag || (window.__sparkLastReportedSceneDiag !== diagKey && (now - (window.__sparkLastReportedSceneDiagTime || 0) > 3000))) {
         window.__sparkLastReportedSceneDiag = diagKey;
         window.__sparkLastReportedSceneDiagTime = now;
-        var diagBanner = 'Scene: ' + ctorName + ' | started=' + isStarted + ' | active=' + isActive + ' | children=' + childCount + ' | fade=' + fadeVal + ' | canvas=' + cw + 'x' + ch;
-        reportDiagnostic('diagnostic', diagBanner);
+        var diagBanner = getSceneTelemetryString();
+        post('sparkLog', diagBanner);
+        post('sparkError', { kind: 'diagnostic', message: diagBanner, source: '', line: 0 });
       }
     }
 
@@ -4807,6 +4998,10 @@
 
   // Poll continuously for readiness and stuck scenes
   setInterval(checkReadinessWatchdog, 500);
+
+  // Emit scene telemetry heartbeat until Scene_Map is active
+  setTimeout(emitSceneHeartbeat, 500);
+  sceneHeartbeatTimer = setInterval(emitSceneHeartbeat, 2000);
 
   // MARK: - Milestone Listeners (DOM, main.js, Scenes)
 

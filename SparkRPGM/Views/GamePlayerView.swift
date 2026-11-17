@@ -160,7 +160,7 @@ struct GamePlayerView: View {
                     .zIndex(8)
             }
 
-            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, (!session.isLoading || diagnostic.hasPrefix("Scene:")), !isFatalErrorDiagnostic(diagnostic) {
+            if let diagnostic = session.bootDiagnostic, !session.isDiagnosticDismissed, !gameFailed, (!session.isLoading || diagnostic.contains("Scene:")), !isFatalErrorDiagnostic(diagnostic) {
                 errorBanner(diagnostic)
                     .zIndex(25)
             }
@@ -674,13 +674,13 @@ struct GamePlayerView: View {
     private func errorBanner(_ message: String) -> some View {
         VStack {
             HStack(alignment: .top, spacing: 9) {
-                Image(systemName: "exclamationmark.triangle.fill")
+                Image(systemName: message.contains("Scene:") ? "info.circle.fill" : "exclamationmark.triangle.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(Color(red: 0.95, green: 0.62, blue: 0.36))
+                    .foregroundColor(message.contains("Scene:") ? Color.cyan : Color(red: 0.95, green: 0.62, blue: 0.36))
                     .padding(.top, 1)
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Game load issue")
+                    Text(message.contains("Scene:") ? "Scene Diagnostic" : "Game load issue")
                         .font(.system(size: 11.5, weight: .semibold))
                         .foregroundColor(SparkTheme.textPrimary)
 

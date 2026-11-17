@@ -36,6 +36,7 @@ struct LibraryView: View {
     @State private var showCoverSourceDialog = false
 
     @State private var gameToDelete: Game?
+    @State private var showingDeleteAlert = false
 
     @State private var alert: LibraryAlert?
 
@@ -57,20 +58,6 @@ struct LibraryView: View {
                     .padding(.bottom, 110)
                 }
                 .background(Color.clear)
-                .alert(item: $gameToDelete) { game in
-                    Alert(
-                        title: Text("Delete \(game.title)?"),
-                        message: Text("The game folder and Documents/save/\(game.folderName) are removed. Zips in backups/ are kept."),
-                        primaryButton: .destructive(Text("Delete Game and Saves")) {
-                            do {
-                                try store.delete(game)
-                            } catch {
-                                presentError(error.localizedDescription)
-                            }
-                        },
-                        secondaryButton: .cancel()
-                    )
-                }
 
                 importBanner
             }
@@ -147,6 +134,18 @@ struct LibraryView: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        .alert("Delete Game?", isPresented: $showingDeleteAlert, presenting: gameToDelete) { game in
+            Button("Delete Game and Saves", role: .destructive) {
+                do {
+                    try store.delete(game)
+                } catch {
+                    presentError(error.localizedDescription)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { game in
+            Text("The game folder and Documents/save/\(game.folderName) are removed. Zips in backups/ are kept.")
+        }
         .onAppear(perform: configureNavigationBar)
     }
 
@@ -356,9 +355,8 @@ struct LibraryView: View {
                     onBackup: { backup(game) },
                     onHide: { hideGame(game) },
                     onDelete: {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            gameToDelete = game
-                        }
+                        gameToDelete = game
+                        showingDeleteAlert = true
                     }
                 )
                 .frame(maxWidth: .infinity)
@@ -385,9 +383,8 @@ struct LibraryView: View {
                     onBackup: { backup(game) },
                     onHide: { hideGame(game) },
                     onDelete: {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            gameToDelete = game
-                        }
+                        gameToDelete = game
+                        showingDeleteAlert = true
                     }
                 )
             }
